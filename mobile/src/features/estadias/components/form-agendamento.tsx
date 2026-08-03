@@ -26,9 +26,12 @@ import {
   useAnimais,
   useAtualizarAgendamento,
   useCancelarAgendamento,
+  useCancelarSerie,
   useCriarAgendamento,
+  useOcorrenciasSerie,
+  useTutores,
 } from '../hooks';
-import { formatarData } from '../../../lib/formatadores';
+import { formatarData, formatarHora } from '../../../lib/formatadores';
 import {
   comHorario,
   fimDaJanela,
@@ -71,12 +74,15 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
 
   const consulta = useAgendamento(agendamentoId);
   const animais = useAnimais();
+  const tutores = useTutores();
   const criar = useCriarAgendamento();
   const atualizar = useAtualizarAgendamento();
   const cancelar = useCancelarAgendamento();
+  const cancelarSerie = useCancelarSerie();
 
   // ── Estado do formulario ──
-  const [animalId, setAnimalId] = useState<string | null>(null);
+  const [tutorId, setTutorId] = useState<string | null>(null);
+  const [animalIds, setAnimalIds] = useState<string[]>([]);
   const [tipo, setTipo] = useState<TipoAgendamento>('creche');
   const [status, setStatus] = useState<StatusAgendamento>('solicitado');
   const [inicio, setInicio] = useState<Date>(new Date());
@@ -117,7 +123,9 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
     const a = consulta.data;
     if (!editando || !a || preenchido) return;
 
-    setAnimalId(a.animalId);
+    setAnimalIds(a.animalIds);
+    // O tutor nao e guardado no agendamento: deduzimos pelo primeiro cao.
+    setTutorId(a.animais?.[0]?.tutorId ?? null);
     setTipo(a.tipo);
     setStatus(a.status);
     setInicio(a.dataHoraInicio);
@@ -163,6 +171,10 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   const comPlano = exigePlanoEstadia(tipo);
   const comEstadia = temEstadia(tipo);
   const comRecorrencia = permiteRecorrencia(tipo);
+
+  const caesDoTutor = (animais.data ?? []).filter(
+    (a) => a.tutorId === tutorId,
+  );
 
   const numeroSemanas = Number(semanas);
   const semanasOk = Number.isInteger(numeroSemanas) && numeroSemanas > 0;
@@ -210,7 +222,7 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
     }
 
     return {
-      animalId: animalId ?? '',
+      animalIds,
       tipo,
       dataHoraInicio: dataInicio,
       dataHoraFim: dataFim,
@@ -263,6 +275,51 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
     }
   }
 
+  /**
+   * Cancela o restante da serie. O corte e "agora": ocorrencias que ja
+   * comecaram permanecem, porque sao registro de frequencia — o cao esteve
+   * la, e marca-las como canceladas falsearia o historico e a cobranca.
+   */
+  function confirmarCancelamentoSerie(recorrenciaId: string) {
+    const agora = new Date();
+    Alert.alert(
+      'Cancelar série inteira',
+      'Todas as ocorrências futuras desta série serão canceladas. ' +
+        'As que já aconteceram são mantidas.',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Cancelar série',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const canceladas = await cancelarSerie.mutateAsync({
+                recorrenciaId,
+                aPartirDe: agora,
+              });
+              if (canceladas.length === 0) {
+                Alert.alert(
+                  'Nada a cancelar',
+                  'Esta série não tem ocorrências futuras.',
+                );
+                return;
+              }
+              Alert.alert(
+                'Pronto',
+                `${canceladas.length} ocorrência${
+                  canceladas.length > 1 ? 's canceladas' : ' cancelada'
+                }.`,
+              );
+              router.back();
+            } catch (e) {
+              Alert.alert('Não foi possível cancelar a série', String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function confirmarCancelamento() {
     Alert.alert(
       'Cancelar agendamento',
@@ -301,23 +358,68 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
     <View style={estilos.tela}>
       <ScrollView contentContainerStyle={s.conteudo}>
         <Secao titulo="Dados principais">
+          {/*
+            O tutor e o principal: ele e quem reserva, e pode trazer mais de
+            um cao no mesmo periodo. A lista de caes abaixo e filtrada por
+            ele — nao ha como marcar caes de tutores diferentes no mesmo
+            agendamento, o que manteria a cobranca e o contato ambiguos.
+          */}
           <Seletor
-            rotulo="Animal *"
-            valor={animalId}
-            opcoes={(animais.data ?? []).map((a) => a.id)}
-            rotuloDe={(id) => {
-              const a = animais.data?.find((x) => x.id === id);
-              return a
-                ? `${a.nome}${a.tutor ? ` — ${a.tutor.nomeCompleto}` : ''}`
-                : id;
+            rotulo="Tutor *"
+            valor={tutorId}
+            opcoes={(tutores.data ?? []).map((t) => t.id)}
+            rotuloDe={(id) =>
+              tutores.data?.find((t) => t.id === id)?.nomeCompleto ?? id
+            }
+            aoSelecionar={(id) => {
+              setTutorId(id);
+              // Trocar de tutor invalida a selecao anterior de caes.
+              if (id !== tutorId) setAnimalIds([]);
             }}
-            aoSelecionar={setAnimalId}
           />
+
+          <Text style={estilos.rotuloCampo}>Cães *</Text>
+          {!tutorId ? (
+            <Text style={s.dica}>Selecione o tutor para listar os cães.</Text>
+          ) : caesDoTutor.length === 0 ? (
+            <Text style={s.dica}>Este tutor não possui cães cadastrados.</Text>
+          ) : (
+            <View style={s.caes}>
+              {caesDoTutor.map((c) => {
+                const marcado = animalIds.includes(c.id);
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() =>
+                      setAnimalIds(
+                        marcado
+                          ? animalIds.filter((x) => x !== c.id)
+                          : [...animalIds, c.id],
+                      )
+                    }
+                    style={[s.cao, marcado && s.caoAtivo]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: marcado }}
+                  >
+                    <Text style={[s.caoTexto, marcado && s.caoTextoAtivo]}>
+                      {marcado ? '✓ ' : ''}
+                      {c.nome}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
           <Seletor
             rotulo="Tipo *"
             valor={tipo}
             opcoes={TIPOS_AGENDAMENTO}
             rotuloDe={(t) => rotuloTipo[t]}
+            // Trocar o tipo depois de criado invalidaria plano, pertences e a
+            // propria serie recorrente — cada tipo guarda dados diferentes.
+            // Para mudar, cancela-se este e cria-se outro.
+            bloqueado={editando}
+            dicaBloqueio="O tipo não pode ser alterado. Cancele este agendamento e crie outro."
             aoSelecionar={(t) => {
               if (!t) return;
               setTipo(t);
@@ -414,6 +516,13 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
           </Secao>
         ) : null}
 
+        {editando && consulta.data?.agendamentoRecorrenciaId ? (
+          <SecaoSerie
+            recorrenciaId={consulta.data.agendamentoRecorrenciaId}
+            atualId={agendamentoId!}
+          />
+        ) : null}
+
         {comPlano ? (
           <Secao titulo="Plano de estadia">
             <Seletor
@@ -427,16 +536,20 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
             />
             <View style={s.linha}>
               <SeletorHora
-                rotulo="Entrada"
+                rotulo="Entrada *"
                 valor={horaEntrada}
                 aoMudar={setHoraEntrada}
               />
               <SeletorHora
-                rotulo="Saída"
+                rotulo="Saída *"
                 valor={horaSaida}
                 aoMudar={setHoraSaida}
               />
             </View>
+            <Text style={s.dica}>
+              Definem o horário de cada dia da creche — inclusive das
+              ocorrências de uma recorrência.
+            </Text>
             <Campo
               rotulo="Total de dias"
               valor={totalDias}
@@ -449,13 +562,25 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
         {comEstadia ? (
           <>
             <Secao titulo="Valor">
+              {/*
+                Creche: o valor e POR DIA. Cada ocorrencia da serie tem sua
+                propria linha em `planos_estadia`, entao um valor de pacote
+                aqui seria replicado em todas e qualquer soma daria o total
+                multiplicado pelo numero de dias.
+              */}
               <Campo
-                rotulo="Valor total da estadia"
+                rotulo={comPlano ? 'Valor da diária' : 'Valor total da estadia'}
                 valor={valorTotal}
                 aoMudar={setValorTotal}
                 teclado="decimal-pad"
                 prefixo="R$"
               />
+              {comPlano ? (
+                <Text style={s.dica}>
+                  Valor cobrado por dia. Numa recorrência, vale para cada
+                  ocorrência gerada.
+                </Text>
+              ) : null}
               {comPlano ? (
                 <Seletor
                   rotulo="Forma de pagamento"
@@ -536,7 +661,20 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
 
         {editando && status !== 'cancelado' ? (
           <Pressable style={s.cancelar} onPress={confirmarCancelamento}>
-            <Text style={s.cancelarTexto}>Cancelar agendamento</Text>
+            <Text style={s.cancelarTexto}>Cancelar este dia</Text>
+          </Pressable>
+        ) : null}
+
+        {editando && consulta.data?.agendamentoRecorrenciaId ? (
+          <Pressable
+            style={[s.cancelar, s.cancelarSerie]}
+            onPress={() =>
+              confirmarCancelamentoSerie(
+                consulta.data!.agendamentoRecorrenciaId!,
+              )
+            }
+          >
+            <Text style={s.cancelarTexto}>Cancelar série inteira</Text>
           </Pressable>
         ) : null}
       </ScrollView>
@@ -560,11 +698,113 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   );
 }
 
+/**
+ * As demais ocorrencias da mesma serie recorrente.
+ *
+ * A lista principal colapsa a serie em um cartao so; e aqui que a equipe ve
+ * os dias de fato. Passadas ficam esmaecidas e canceladas riscadas, para o
+ * historico continuar visivel sem competir com o que ainda vai acontecer.
+ */
+function SecaoSerie({
+  recorrenciaId,
+  atualId,
+}: {
+  recorrenciaId: string;
+  atualId: string;
+}) {
+  const router = useRouter();
+  const { data, isPending } = useOcorrenciasSerie(recorrenciaId);
+
+  if (isPending) {
+    return (
+      <Secao titulo="Ocorrências da série">
+        <ActivityIndicator color={cores.primaria} />
+      </Secao>
+    );
+  }
+
+  const ocorrencias = data ?? [];
+  const agora = Date.now();
+  const restantes = ocorrencias.filter(
+    (o) => o.status !== 'cancelado' && o.dataHoraInicio.getTime() >= agora,
+  ).length;
+
+  return (
+    <Secao titulo={`Ocorrências da série (${ocorrencias.length})`}>
+      <Text style={s.dica}>
+        {restantes > 0
+          ? `${restantes} ainda por vir. Toque para abrir.`
+          : 'Nenhuma ocorrência futura nesta série.'}
+      </Text>
+      {ocorrencias.map((o) => {
+        const cancelada = o.status === 'cancelado';
+        const passada = o.dataHoraInicio.getTime() < agora;
+        const atual = o.id === atualId;
+        return (
+          <Pressable
+            key={o.id}
+            disabled={atual}
+            onPress={() => router.push(`/estadias/agendamento/${o.id}`)}
+            style={[s.ocorrencia, atual && s.ocorrenciaAtual]}
+          >
+            <Text
+              style={[
+                s.ocorrenciaData,
+                passada && !cancelada && s.ocorrenciaPassada,
+                cancelada && s.ocorrenciaCancelada,
+              ]}
+            >
+              {formatarData(o.dataHoraInicio)} · {formatarHora(o.dataHoraInicio)}
+              {o.dataHoraFim ? ` – ${formatarHora(o.dataHoraFim)}` : ''}
+            </Text>
+            {atual ? (
+              <Text style={s.etiquetaAtual}>esta</Text>
+            ) : cancelada ? (
+              <Text style={s.etiquetaCancelada}>cancelada</Text>
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </Secao>
+  );
+}
+
 const s = StyleSheet.create({
   conteudo: { padding: espaco.lg, paddingBottom: espaco.xxl },
   flex: { flex: 1 },
   linha: { flexDirection: 'row', gap: espaco.md },
   dica: { fontSize: 12, color: cores.textoSuave },
+  ocorrencia: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: espaco.sm,
+    paddingHorizontal: espaco.sm,
+    borderRadius: raio.md,
+    gap: espaco.sm,
+  },
+  ocorrenciaAtual: { backgroundColor: cores.neutraTenue },
+  ocorrenciaData: { fontSize: 14, color: cores.textoEscuro },
+  ocorrenciaPassada: { color: cores.textoSuave },
+  ocorrenciaCancelada: {
+    color: cores.textoSuave,
+    textDecorationLine: 'line-through',
+  },
+  etiquetaAtual: { fontSize: 11, fontWeight: '700', color: cores.primaria },
+  etiquetaCancelada: { fontSize: 11, color: cores.textoSuave },
+  cancelarSerie: { marginTop: espaco.sm },
+  caes: { flexDirection: 'row', flexWrap: 'wrap', gap: espaco.sm },
+  cao: {
+    paddingVertical: espaco.sm,
+    paddingHorizontal: espaco.md,
+    borderRadius: raio.pill,
+    borderWidth: 1,
+    borderColor: cores.neutra,
+    backgroundColor: cores.branco,
+  },
+  caoAtivo: { backgroundColor: cores.primaria, borderColor: cores.primaria },
+  caoTexto: { fontSize: 14, color: cores.textoEscuro },
+  caoTextoAtivo: { color: cores.branco, fontWeight: '700' },
   dias: { flexDirection: 'row', flexWrap: 'wrap', gap: espaco.sm },
   dia: {
     paddingHorizontal: espaco.md,

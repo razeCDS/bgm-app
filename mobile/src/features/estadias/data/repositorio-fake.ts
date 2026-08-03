@@ -154,10 +154,13 @@ export class RepositorioFake implements EstadiasRepositorio {
   // ── Agendamentos ──
 
   private hidratar(a: Agendamento): Agendamento {
-    const animal = this.animais.find((x) => x.id === a.animalId);
+    const animais = a.animalIds
+      .map((id) => this.animais.find((x) => x.id === id))
+      .filter((x): x is NonNullable<typeof x> => !!x)
+      .map((x) => ({ ...x, tutor: this.tutorDe(x.tutorId) }));
     return {
       ...a,
-      animal: animal ? { ...animal, tutor: this.tutorDe(animal.tutorId) } : null,
+      animais,
       planoEstadia: this.planos.find((p) => p.agendamentoId === a.id) ?? null,
       pertencesDeixados:
         this.pertences.find((p) => p.agendamentoId === a.id) ?? null,
@@ -169,8 +172,15 @@ export class RepositorioFake implements EstadiasRepositorio {
     return this.agendamentos
       .map((a) => this.hidratar(a))
       .filter((a) => {
-        if (filtro.animalId && a.animalId !== filtro.animalId) return false;
-        if (filtro.tutorId && a.animal?.tutorId !== filtro.tutorId) return false;
+        if (filtro.animalId && !a.animalIds.includes(filtro.animalId)) {
+          return false;
+        }
+        if (
+          filtro.tutorId &&
+          !(a.animais ?? []).some((x) => x.tutorId === filtro.tutorId)
+        ) {
+          return false;
+        }
         if (filtro.tipo && a.tipo !== filtro.tipo) return false;
         if (filtro.status && a.status !== filtro.status) return false;
         // Intervalo: sobreposicao com o periodo informado.
@@ -191,13 +201,23 @@ export class RepositorioFake implements EstadiasRepositorio {
     return this.hidratar(a);
   }
 
+  async listarOcorrencias(recorrenciaId: string): Promise<Agendamento[]> {
+    await atraso();
+    return this.agendamentos
+      .filter((a) => a.agendamentoRecorrenciaId === recorrenciaId)
+      .sort(
+        (a, b) => a.dataHoraInicio.getTime() - b.dataHoraInicio.getTime(),
+      )
+      .map((a) => this.hidratar(a));
+  }
+
   /**
    * O mesmo animal nao pode ocupar dois periodos que se cruzam — a mesma
    * regra que a constraint `excl_animal_sem_sobreposicao` impoe no banco.
    * Cancelados nao contam.
    */
   private conflita(
-    animalId: string,
+    animalIds: string[],
     inicio: Date,
     fim: Date | null,
     ignorarId?: string,
@@ -205,7 +225,8 @@ export class RepositorioFake implements EstadiasRepositorio {
     const novo = periodoOcupado(inicio, fim);
     return this.agendamentos.some((a) => {
       if (a.id === ignorarId) return false;
-      if (a.animalId !== animalId) return false;
+      // Basta UM animal em comum: a constraint do banco e por animal.
+      if (!a.animalIds.some((id) => animalIds.includes(id))) return false;
       if (a.status === 'cancelado') return false;
       return periodosSobrepoem(
         novo,
@@ -219,7 +240,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     await atraso();
 
     if (!geraRecorrencia(entrada)) {
-      if (this.conflita(entrada.animalId, entrada.dataHoraInicio, entrada.dataHoraFim)) {
+      if (this.conflita(entrada.animalIds, entrada.dataHoraInicio, entrada.dataHoraFim)) {
         throw new ErroValidacao(ERRO_SOBREPOSICAO);
       }
       return [this.inserirUm(entrada, entrada.dataHoraInicio, entrada.dataHoraFim)];
@@ -232,7 +253,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     // inteira. Sem esta checagem previa, o modo em memoria deixaria metade
     // da serie gravada — divergindo do comportamento real.
     for (const { inicio, fim } of ocorrencias) {
-      if (this.conflita(entrada.animalId, inicio, fim)) {
+      if (this.conflita(entrada.animalIds, inicio, fim)) {
         throw new ErroValidacao(ERRO_SOBREPOSICAO);
       }
     }
@@ -252,7 +273,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     const id = uid();
     const novo: Agendamento = {
       id,
-      animalId: e.animalId,
+      animalIds: [...e.animalIds],
       tipo: e.tipo,
       dataHoraInicio: inicio,
       dataHoraFim: fim,
@@ -293,7 +314,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     if (
       entrada.status !== 'cancelado' &&
       this.conflita(
-        entrada.animalId,
+        entrada.animalIds,
         entrada.dataHoraInicio,
         entrada.dataHoraFim,
         id,
@@ -304,7 +325,7 @@ export class RepositorioFake implements EstadiasRepositorio {
 
     this.agendamentos[i] = {
       ...this.agendamentos[i],
-      animalId: entrada.animalId,
+      animalIds: [...entrada.animalIds],
       tipo: entrada.tipo,
       dataHoraInicio: entrada.dataHoraInicio,
       dataHoraFim: entrada.dataHoraFim,
@@ -334,6 +355,30 @@ export class RepositorioFake implements EstadiasRepositorio {
     if (i < 0) throw new ErroValidacao('Agendamento nao encontrado.');
     this.agendamentos[i] = { ...this.agendamentos[i], status: 'cancelado' };
     return this.hidratar(this.agendamentos[i]);
+  }
+
+  async cancelarSerie(
+    recorrenciaId: string,
+    aPartirDe: Date,
+  ): Promise<Agendamento[]> {
+    await atraso();
+    const corte = aPartirDe.getTime();
+    const cancelados: Agendamento[] = [];
+
+    this.agendamentos = this.agendamentos.map((a) => {
+      const alvo =
+        a.agendamentoRecorrenciaId === recorrenciaId &&
+        a.status !== 'cancelado' &&
+        a.dataHoraInicio.getTime() >= corte;
+      if (!alvo) return a;
+      const atualizado = { ...a, status: 'cancelado' as const };
+      cancelados.push(this.hidratar(atualizado));
+      return atualizado;
+    });
+
+    return cancelados.sort(
+      (x, y) => x.dataHoraInicio.getTime() - y.dataHoraInicio.getTime(),
+    );
   }
 
   // ── Dados de exemplo ──
@@ -511,7 +556,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     // Visita — sem plano nem pertences.
     this.inserirUm(
       {
-        animalId: luna.id,
+        animalIds: [luna.id],
         tipo: 'visita',
         dataHoraInicio: new Date(2026, 7, 10, 14),
         dataHoraFim: new Date(2026, 7, 10, 15),
@@ -529,7 +574,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     // Hotel — sem plano de rotina; apenas valor e pertences.
     this.inserirUm(
       {
-        animalId: thor.id,
+        animalIds: [thor.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 7, 18, 9),
         dataHoraFim: new Date(2026, 7, 22, 18),
@@ -565,7 +610,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     // Creche avulsa.
     this.inserirUm(
       {
-        animalId: mel.id,
+        animalIds: [mel.id],
         tipo: 'creche',
         dataHoraInicio: new Date(2026, 7, 5, 8),
         dataHoraFim: new Date(2026, 7, 5, 17),
@@ -589,7 +634,7 @@ export class RepositorioFake implements EstadiasRepositorio {
 
     // Creche recorrente — Seg/Qua/Sex ao longo de agosto.
     const regra: EntradaAgendamento = {
-      animalId: rex.id,
+      animalIds: [rex.id, thor.id],
       tipo: 'creche',
       dataHoraInicio: new Date(2026, 7, 3, 8),
       dataHoraFim: new Date(2026, 7, 28, 18),

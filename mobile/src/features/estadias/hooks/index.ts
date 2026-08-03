@@ -89,35 +89,17 @@ export function useAgendamentos() {
 }
 
 /**
- * Agendamentos que tocam o mes de [referencia], para a aba Agenda.
+ * Ocorrencias de uma serie recorrente, para exibir dentro do agendamento.
  *
- * Reaproveita o filtro por intervalo que o repositorio ja expoe — nenhuma
- * mudanca foi necessaria na camada de dados. Nao usa o filtro global da aba
- * Agendamentos de proposito: um filtro esquecido la deixaria o calendario
- * misteriosamente vazio.
+ * Nao usa o filtro global da aba de proposito: a serie e o contexto daquele
+ * agendamento, e um filtro esquecido esconderia ocorrencias sem explicacao.
  */
-export function useAgendamentosDoMes(referencia: Date) {
-  const inicio = new Date(referencia.getFullYear(), referencia.getMonth(), 1);
-  const fim = new Date(
-    referencia.getFullYear(),
-    referencia.getMonth() + 1,
-    0,
-    23,
-    59,
-    59,
-  );
-
-  const filtro: FiltroAgendamentos = {
-    ...FILTRO_VAZIO,
-    dataInicio: inicio,
-    dataFim: fim,
-  };
-
-  return useQuery({
-    queryKey: ['agenda-mes', inicio.toISOString()],
-    queryFn: () => repositorio.listarAgendamentos(filtro),
+export const useOcorrenciasSerie = (recorrenciaId: string | null | undefined) =>
+  useQuery({
+    queryKey: ['serie', recorrenciaId ?? ''],
+    queryFn: () => repositorio.listarOcorrencias(recorrenciaId!),
+    enabled: !!recorrenciaId,
   });
-}
 
 export const useAgendamento = (id: string | undefined) =>
   useQuery({
@@ -140,6 +122,8 @@ function useInvalidar() {
     agendamentos: () => {
       qc.invalidateQueries({ queryKey: ['agendamentos'] });
       qc.invalidateQueries({ queryKey: ['agendamento'] });
+      // Cancelar uma ocorrencia muda a lista da serie exibida nas outras.
+      qc.invalidateQueries({ queryKey: ['serie'] });
     },
   };
 }
@@ -195,6 +179,26 @@ export function useCancelarAgendamento() {
   const inv = useInvalidar();
   return useMutation({
     mutationFn: (id: string) => repositorio.cancelarAgendamento(id),
+    onSuccess: inv.agendamentos,
+  });
+}
+
+/**
+ * Cancela as ocorrencias futuras da serie de uma vez.
+ *
+ * `aPartirDe` e resolvido na chamada (e nao dentro do repositorio) para o
+ * corte ser explicito e testavel — sem depender do relogio de quem executa.
+ */
+export function useCancelarSerie() {
+  const inv = useInvalidar();
+  return useMutation({
+    mutationFn: ({
+      recorrenciaId,
+      aPartirDe,
+    }: {
+      recorrenciaId: string;
+      aPartirDe: Date;
+    }) => repositorio.cancelarSerie(recorrenciaId, aPartirDe),
     onSuccess: inv.agendamentos,
   });
 }

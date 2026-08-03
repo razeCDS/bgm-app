@@ -108,8 +108,10 @@ export class RepositorioSupabase implements EstadiasRepositorio {
   }
 
   /** Embed usado sempre que a lista de agendamentos e carregada. */
+  // Os animais vem pela juncao `agendamento_animais`, aninhados dois niveis.
   private readonly selectAgendamento =
-    '*, animais(*, tutores(*)), planos_estadia(*), pertences_deixados(*)';
+    '*, agendamento_animais(animal_id, animais(*, tutores(*))), ' +
+    'planos_estadia(*), pertences_deixados(*)';
 
   // ── Tutores ──
 
@@ -226,14 +228,23 @@ export class RepositorioSupabase implements EstadiasRepositorio {
   async listarAgendamentos(filtro: FiltroAgendamentos): Promise<Agendamento[]> {
     // `!inner` e necessario para que o filtro por tutor restrinja o
     // agendamento, e nao apenas o objeto embutido.
-    const select = filtro.tutorId
-      ? '*, animais!inner(*, tutores(*)), planos_estadia(*), pertences_deixados(*)'
-      : this.selectAgendamento;
+    // `!inner` faz o filtro restringir o agendamento, e nao apenas o objeto
+    // embutido. Com a juncao no meio, o `!inner` precisa valer nos dois
+    // niveis, senao um agendamento sem o animal buscado ainda voltaria.
+    const select =
+      filtro.tutorId || filtro.animalId
+        ? '*, agendamento_animais!inner(animal_id, animais!inner(*, tutores(*))), ' +
+          'planos_estadia(*), pertences_deixados(*)'
+        : this.selectAgendamento;
 
     let q = this.db.from('agendamentos').select(select);
 
-    if (filtro.animalId) q = q.eq('animal_id', filtro.animalId);
-    if (filtro.tutorId) q = q.eq('animais.tutor_id', filtro.tutorId);
+    if (filtro.animalId) {
+      q = q.eq('agendamento_animais.animal_id', filtro.animalId);
+    }
+    if (filtro.tutorId) {
+      q = q.eq('agendamento_animais.animais.tutor_id', filtro.tutorId);
+    }
     if (filtro.tipo) q = q.eq('tipo', filtro.tipo);
     if (filtro.status) q = q.eq('status', filtro.status);
     // Semantica de SOBREPOSICAO com o periodo (a mesma do repositorio em
@@ -268,6 +279,16 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     return agendamentoDeLinha(data as any);
   }
 
+  async listarOcorrencias(recorrenciaId: string): Promise<Agendamento[]> {
+    const { data, error } = await this.db
+      .from('agendamentos')
+      .select(this.selectAgendamento)
+      .eq('agendamento_recorrencia_id', recorrenciaId)
+      .order('data_hora_inicio', { ascending: true });
+    if (error) throw traduzirErro(error);
+    return (data as any[]).map(agendamentoDeLinha);
+  }
+
   async criarAgendamento(entrada: EntradaAgendamento): Promise<Agendamento[]> {
     garantirValido(entrada);
 
@@ -277,7 +298,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       const { data: ids, error } = await this.db.rpc(
         'gerar_ocorrencias_recorrencia',
         {
-          p_animal_id: entrada.animalId,
+          p_animal_ids: entrada.animalIds,
           p_data_inicio: entrada.dataHoraInicio.toISOString(),
           p_data_fim: entrada.dataHoraFim!.toISOString(),
           p_dias_semana: entrada.diasSemanaRecorrencia,
@@ -305,25 +326,24 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       return (data ?? []).map((l) => agendamentoDeLinha(l as any));
     }
 
-    const { data, error } = await this.db
-      .from('agendamentos')
-      .insert({
-        animal_id: entrada.animalId,
-        tipo: entrada.tipo,
-        data_hora_inicio: entrada.dataHoraInicio.toISOString(),
-        data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
-        status: entrada.status,
-        recorrente: entrada.recorrente,
-        dias_semana_recorrencia: entrada.diasSemanaRecorrencia,
-        observacoes: entrada.observacoes,
-      })
-      .select()
-      .single();
+    // RPC em vez de 4 inserts soltos: cada chamada PostgREST e sua propria
+    // transacao, entao uma rejeicao da constraint de sobreposicao deixava o
+    // agendamento gravado sem nenhum cao. Aqui ou grava tudo, ou nada.
+    const { data: id, error } = await this.db.rpc('criar_agendamento', {
+      p_animal_ids: entrada.animalIds,
+      p_tipo: entrada.tipo,
+      p_data_hora_inicio: entrada.dataHoraInicio.toISOString(),
+      p_data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
+      p_status: entrada.status,
+      p_observacoes: entrada.observacoes,
+      p_plano: entrada.planoEstadia ? planoParaLinha(entrada.planoEstadia) : null,
+      p_pertences: entrada.pertencesDeixados
+        ? pertencesParaLinha(entrada.pertencesDeixados)
+        : null,
+    });
     if (error) throw traduzirErro(error);
 
-    const id = data.id as string;
-    await this.gravarRelacionados(id, entrada);
-    return [await this.obterAgendamento(id)];
+    return [await this.obterAgendamento(id as string)];
   }
 
   async atualizarAgendamento(
@@ -332,45 +352,26 @@ export class RepositorioSupabase implements EstadiasRepositorio {
   ): Promise<Agendamento> {
     garantirValido(entrada);
 
-    const { error } = await this.db
-      .from('agendamentos')
-      .update({
-        animal_id: entrada.animalId,
-        tipo: entrada.tipo,
-        data_hora_inicio: entrada.dataHoraInicio.toISOString(),
-        data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
-        status: entrada.status,
-        observacoes: entrada.observacoes,
-      })
-      .eq('id', id);
+    // Mesma razao da criacao: transacao unica no banco.
+    const { error } = await this.db.rpc('atualizar_agendamento', {
+      p_id: id,
+      p_animal_ids: entrada.animalIds,
+      p_tipo: entrada.tipo,
+      p_data_hora_inicio: entrada.dataHoraInicio.toISOString(),
+      p_data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
+      p_status: entrada.status,
+      p_observacoes: entrada.observacoes,
+      p_plano: entrada.planoEstadia ? planoParaLinha(entrada.planoEstadia) : null,
+      p_pertences: entrada.pertencesDeixados
+        ? pertencesParaLinha(entrada.pertencesDeixados)
+        : null,
+    });
     if (error) throw traduzirErro(error);
-
-    await this.db.from('planos_estadia').delete().eq('agendamento_id', id);
-    await this.db.from('pertences_deixados').delete().eq('agendamento_id', id);
-    await this.gravarRelacionados(id, entrada);
 
     return this.obterAgendamento(id);
   }
 
-  private async gravarRelacionados(
-    agendamentoId: string,
-    entrada: EntradaAgendamento,
-  ): Promise<void> {
-    if (entrada.planoEstadia) {
-      const { error } = await this.db.from('planos_estadia').insert({
-        ...planoParaLinha(entrada.planoEstadia),
-        agendamento_id: agendamentoId,
-      });
-      if (error) throw traduzirErro(error);
-    }
-    if (entrada.pertencesDeixados) {
-      const { error } = await this.db.from('pertences_deixados').insert({
-        ...pertencesParaLinha(entrada.pertencesDeixados),
-        agendamento_id: agendamentoId,
-      });
-      if (error) throw traduzirErro(error);
-    }
-  }
+
 
   async cancelarAgendamento(id: string): Promise<Agendamento> {
     // Cancelar muda o status; o registro nunca e apagado.
@@ -380,5 +381,24 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .eq('id', id);
     if (error) throw traduzirErro(error);
     return this.obterAgendamento(id);
+  }
+
+  async cancelarSerie(
+    recorrenciaId: string,
+    aPartirDe: Date,
+  ): Promise<Agendamento[]> {
+    // Um unico UPDATE: o banco resolve a serie inteira numa transacao, e o
+    // trigger do Google dispara uma vez por linha alterada, apagando os
+    // eventos correspondentes.
+    const { data, error } = await this.db
+      .from('agendamentos')
+      .update({ status: 'cancelado' })
+      .eq('agendamento_recorrencia_id', recorrenciaId)
+      .neq('status', 'cancelado')
+      .gte('data_hora_inicio', aPartirDe.toISOString())
+      .select(this.selectAgendamento)
+      .order('data_hora_inicio', { ascending: true });
+    if (error) throw traduzirErro(error);
+    return (data as any[]).map(agendamentoDeLinha);
   }
 }

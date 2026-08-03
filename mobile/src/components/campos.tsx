@@ -71,6 +71,8 @@ export function Seletor<T extends string>({
   aoSelecionar,
   permiteVazio,
   textoVazio = 'Todos',
+  bloqueado,
+  dicaBloqueio,
 }: {
   rotulo: string;
   valor: T | null;
@@ -79,6 +81,9 @@ export function Seletor<T extends string>({
   aoSelecionar: (v: T | null) => void;
   permiteVazio?: boolean;
   textoVazio?: string;
+  /** Somente leitura: mostra o valor, mas nao abre a lista. */
+  bloqueado?: boolean;
+  dicaBloqueio?: string;
 }) {
   const [aberto, setAberto] = useState(false);
 
@@ -86,14 +91,24 @@ export function Seletor<T extends string>({
     <View style={s.bloco}>
       <Text style={estilos.rotuloCampo}>{rotulo}</Text>
       <Pressable
-        onPress={() => setAberto(true)}
-        style={[estilos.campoCaixa, s.seletor]}
+        onPress={bloqueado ? undefined : () => setAberto(true)}
+        disabled={bloqueado}
+        accessibilityState={{ disabled: !!bloqueado }}
+        style={[estilos.campoCaixa, s.seletor, bloqueado && s.seletorBloqueado]}
       >
-        <Text style={valor ? s.seletorTexto : s.seletorVazio}>
+        <Text
+          style={[
+            valor ? s.seletorTexto : s.seletorVazio,
+            bloqueado && s.textoBloqueado,
+          ]}
+        >
           {valor ? rotuloDe(valor) : 'Selecionar'}
         </Text>
-        <Text style={s.seta}>▾</Text>
+        <Text style={s.seta}>{bloqueado ? '🔒' : '▾'}</Text>
       </Pressable>
+      {bloqueado && dicaBloqueio ? (
+        <Text style={s.dicaBloqueio}>{dicaBloqueio}</Text>
+      ) : null}
 
       <Modal visible={aberto} transparent animationType="fade">
         <Pressable style={s.fundoModal} onPress={() => setAberto(false)}>
@@ -331,6 +346,9 @@ const s = StyleSheet.create({
   seletorTexto: { flex: 1, fontSize: 15, color: cores.textoEscuro },
   seletorVazio: { flex: 1, fontSize: 15, color: cores.textoSuave },
   seta: { color: cores.textoSuave, fontSize: 14 },
+  seletorBloqueado: { backgroundColor: cores.neutraClara, opacity: 0.85 },
+  textoBloqueado: { color: cores.textoSuave },
+  dicaBloqueio: { fontSize: 12, color: cores.textoSuave, marginTop: 4 },
 
   fundoModal: {
     flex: 1,

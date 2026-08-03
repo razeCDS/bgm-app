@@ -10,7 +10,7 @@ import { diaSemanaDe, type DiaSemana } from '../types/enums';
 import { FILTRO_VAZIO } from '../types/modelos';
 
 const base = (over: Partial<EntradaAgendamento> = {}): EntradaAgendamento => ({
-  animalId: 'x',
+  animalIds: ['x'],
   tipo: 'visita',
   dataHoraInicio: new Date(2026, 7, 10),
   dataHoraFim: null,
@@ -30,6 +30,16 @@ const planoVazio = {
   horarioSaida: null,
   formaPagamento: null,
   valorTotal: null,
+};
+
+/**
+ * Plano minimo valido para Creche: entrada e saida sao obrigatorias, porque
+ * sao a unica fonte da hora de cada ocorrencia.
+ */
+const planoCreche = {
+  ...planoVazio,
+  horarioEntrada: '08:00',
+  horarioSaida: '18:00',
 };
 
 describe('Regras de negocio', () => {
@@ -60,6 +70,40 @@ describe('Regras de negocio', () => {
   it('Creche exige plano de estadia', () => {
     const erro = validarAgendamento(base({ tipo: 'creche' }));
     expect(erro).toContain('obrigatorio');
+  });
+
+  it('Creche exige horario de entrada e de saida', () => {
+    // Sem a secao de Periodo, estes horarios sao a unica fonte da hora de
+    // cada ocorrencia — nulos, tudo cairia a meia-noite silenciosamente.
+    const semNada = validarAgendamento(
+      base({ tipo: 'creche', planoEstadia: planoVazio }),
+    );
+    expect(semNada).toContain('entrada');
+
+    const semSaida = validarAgendamento(
+      base({
+        tipo: 'creche',
+        planoEstadia: { ...planoVazio, horarioEntrada: '08:00' },
+      }),
+    );
+    expect(semSaida).toContain('saida');
+
+    expect(
+      validarAgendamento(base({ tipo: 'creche', planoEstadia: planoCreche })),
+    ).toBeNull();
+  });
+
+  it('Hotel continua sem exigir horarios do plano', () => {
+    // A exigencia vale so para Creche: o Hotel informa o periodo direto.
+    expect(
+      validarAgendamento(
+        base({
+          tipo: 'hotel',
+          dataHoraFim: new Date(2026, 7, 14),
+          planoEstadia: { ...planoVazio, valorTotal: 480 },
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('recorrencia so vale para Creche', () => {
@@ -99,7 +143,7 @@ describe('Recorrencia', () => {
       status: 'confirmado',
       recorrente: true,
       diasSemanaRecorrencia: [1, 3, 5] as DiaSemana[],
-      planoEstadia: planoVazio,
+      planoEstadia: planoCreche,
     });
 
     const ocorrencias = gerarOcorrencias(entrada);
@@ -139,14 +183,14 @@ describe('Recorrencia', () => {
 
     const criados = await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'creche',
         dataHoraInicio: new Date(2026, 7, 3, 8),
         dataHoraFim: new Date(2026, 7, 14, 18),
         status: 'confirmado',
         recorrente: true,
         diasSemanaRecorrencia: [1],
-        planoEstadia: planoVazio,
+        planoEstadia: planoCreche,
       }),
     );
 
@@ -263,7 +307,7 @@ describe('Dupla reserva do mesmo animal', () => {
 
     await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
@@ -274,12 +318,12 @@ describe('Dupla reserva do mesmo animal', () => {
     await expect(
       repo.criarAgendamento(
         base({
-          animalId: animal.id,
+          animalIds: [animal.id],
           tipo: 'creche',
           dataHoraInicio: new Date(2026, 8, 12, 8),
           dataHoraFim: new Date(2026, 8, 12, 18),
           status: 'solicitado',
-          planoEstadia: planoVazio,
+          planoEstadia: planoCreche,
         }),
       ),
     ).rejects.toThrow(/mesmo período|neste período/i);
@@ -290,7 +334,7 @@ describe('Dupla reserva do mesmo animal', () => {
 
     const [criado] = await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
@@ -301,12 +345,12 @@ describe('Dupla reserva do mesmo animal', () => {
 
     const novos = await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'creche',
         dataHoraInicio: new Date(2026, 8, 12, 8),
         dataHoraFim: new Date(2026, 8, 12, 18),
         status: 'solicitado',
-        planoEstadia: planoVazio,
+        planoEstadia: planoCreche,
       }),
     );
     expect(novos).toHaveLength(1);
@@ -317,7 +361,7 @@ describe('Dupla reserva do mesmo animal', () => {
 
     const [criado] = await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
@@ -327,7 +371,7 @@ describe('Dupla reserva do mesmo animal', () => {
 
     const atualizado = await repo.atualizarAgendamento(criado.id, {
       ...base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 8, 11, 9),
         dataHoraFim: new Date(2026, 8, 15, 18),
@@ -343,7 +387,7 @@ describe('Dupla reserva do mesmo animal', () => {
     // Ocupa uma quarta-feira no meio do periodo da serie.
     await repo.criarAgendamento(
       base({
-        animalId: animal.id,
+        animalIds: [animal.id],
         tipo: 'hotel',
         dataHoraInicio: new Date(2026, 7, 12, 9),
         dataHoraFim: new Date(2026, 7, 12, 18),
@@ -355,14 +399,14 @@ describe('Dupla reserva do mesmo animal', () => {
     await expect(
       repo.criarAgendamento(
         base({
-          animalId: animal.id,
+          animalIds: [animal.id],
           tipo: 'creche',
           dataHoraInicio: new Date(2026, 7, 3, 9),
           dataHoraFim: new Date(2026, 7, 28, 18),
           status: 'confirmado',
           recorrente: true,
           diasSemanaRecorrencia: [3], // quartas
-          planoEstadia: planoVazio,
+          planoEstadia: planoCreche,
         }),
       ),
     ).rejects.toThrow();
@@ -370,6 +414,291 @@ describe('Dupla reserva do mesmo animal', () => {
     // Nenhuma ocorrencia parcial: no banco a RPC e transacional.
     const depois = (await repo.listarAgendamentos(FILTRO_VAZIO)).length;
     expect(depois).toBe(antes);
+  });
+});
+
+describe('Varios caes no mesmo agendamento', () => {
+  async function tutorComDoisCaes() {
+    const repo = new RepositorioFake(false);
+    const tutor = await repo.salvarTutor({
+      id: '',
+      nomeCompleto: 'Tutor',
+      endereco: null,
+      rg: null,
+      cpfCnpj: '123',
+      telefone: null,
+      email: null,
+    });
+    const criar = (nome: string) =>
+      repo.salvarAnimal({
+        id: '',
+        tutorId: tutor.id,
+        nome,
+        raca: null,
+        idade: null,
+        porte: null,
+        peso: null,
+        especie: null,
+        sexo: null,
+        castrado: null,
+        docil: null,
+        observacoes: null,
+      });
+    return { repo, tutor, rex: await criar('Rex'), toby: await criar('Toby') };
+  }
+
+  it('um agendamento atende dois caes do mesmo tutor', async () => {
+    const { repo, rex, toby } = await tutorComDoisCaes();
+
+    const [criado] = await repo.criarAgendamento(
+      base({
+        animalIds: [rex.id, toby.id],
+        tipo: 'hotel',
+        dataHoraInicio: new Date(2026, 8, 10, 9),
+        dataHoraFim: new Date(2026, 8, 14, 18),
+        status: 'confirmado',
+      }),
+    );
+
+    // Um unico agendamento, nao dois.
+    expect(criado.animalIds).toHaveLength(2);
+    expect((await repo.listarAgendamentos(FILTRO_VAZIO))).toHaveLength(1);
+    expect(criado.animais?.map((a) => a.nome).sort()).toEqual(['Rex', 'Toby']);
+  });
+
+  it('basta um cao em comum para haver sobreposicao', async () => {
+    const { repo, rex, toby } = await tutorComDoisCaes();
+
+    await repo.criarAgendamento(
+      base({
+        animalIds: [rex.id, toby.id],
+        tipo: 'hotel',
+        dataHoraInicio: new Date(2026, 8, 10, 9),
+        dataHoraFim: new Date(2026, 8, 14, 18),
+        status: 'confirmado',
+      }),
+    );
+
+    // So o Toby se repete — e ja basta, como na constraint do banco.
+    await expect(
+      repo.criarAgendamento(
+        base({
+          animalIds: [toby.id],
+          tipo: 'creche',
+          dataHoraInicio: new Date(2026, 8, 12, 8),
+          dataHoraFim: new Date(2026, 8, 12, 18),
+          status: 'solicitado',
+          planoEstadia: planoCreche,
+        }),
+      ),
+    ).rejects.toThrow(/mesmo período|neste período/i);
+  });
+
+  it('caes diferentes no mesmo periodo convivem', async () => {
+    const { repo, rex, toby } = await tutorComDoisCaes();
+
+    await repo.criarAgendamento(
+      base({
+        animalIds: [rex.id],
+        tipo: 'hotel',
+        dataHoraInicio: new Date(2026, 8, 10, 9),
+        dataHoraFim: new Date(2026, 8, 14, 18),
+        status: 'confirmado',
+      }),
+    );
+
+    const novos = await repo.criarAgendamento(
+      base({
+        animalIds: [toby.id],
+        tipo: 'hotel',
+        dataHoraInicio: new Date(2026, 8, 10, 9),
+        dataHoraFim: new Date(2026, 8, 14, 18),
+        status: 'confirmado',
+      }),
+    );
+    expect(novos).toHaveLength(1);
+  });
+
+  it('filtro por tutor encontra o agendamento pelos caes', async () => {
+    const { repo, tutor, rex, toby } = await tutorComDoisCaes();
+
+    await repo.criarAgendamento(
+      base({
+        animalIds: [rex.id, toby.id],
+        tipo: 'hotel',
+        dataHoraInicio: new Date(2026, 8, 10, 9),
+        dataHoraFim: new Date(2026, 8, 14, 18),
+        status: 'confirmado',
+      }),
+    );
+
+    const porTutor = await repo.listarAgendamentos({
+      ...FILTRO_VAZIO,
+      tutorId: tutor.id,
+    });
+    expect(porTutor).toHaveLength(1);
+
+    const porAnimal = await repo.listarAgendamentos({
+      ...FILTRO_VAZIO,
+      animalId: toby.id,
+    });
+    expect(porAnimal).toHaveLength(1);
+
+    const outro = await repo.listarAgendamentos({
+      ...FILTRO_VAZIO,
+      animalId: 'inexistente',
+    });
+    expect(outro).toHaveLength(0);
+  });
+});
+
+describe('Ocorrencias de uma serie', () => {
+  it('devolve a serie inteira em ordem, inclusive canceladas', async () => {
+    const repo = new RepositorioFake(false);
+    const tutor = await repo.salvarTutor({
+      id: '',
+      nomeCompleto: 'Tutor',
+      endereco: null,
+      rg: null,
+      cpfCnpj: '123',
+      telefone: null,
+      email: null,
+    });
+    const animal = await repo.salvarAnimal({
+      id: '',
+      tutorId: tutor.id,
+      nome: 'Rex',
+      raca: null,
+      idade: null,
+      porte: null,
+      peso: null,
+      especie: null,
+      sexo: null,
+      castrado: null,
+      docil: null,
+      observacoes: null,
+    });
+
+    const inicio = new Date(2026, 7, 3);
+    const criados = await repo.criarAgendamento(
+      base({
+        animalIds: [animal.id],
+        tipo: 'creche',
+        dataHoraInicio: comHorario(inicio, '08:00'),
+        dataHoraFim: comHorario(fimDaJanela(inicio, 4), '18:00'),
+        status: 'confirmado',
+        recorrente: true,
+        diasSemanaRecorrencia: [1],
+        planoEstadia: {
+          ...planoVazio,
+          horarioEntrada: '08:00',
+          horarioSaida: '18:00',
+        },
+      }),
+    );
+    expect(criados).toHaveLength(4);
+
+    const serieId = criados[0].agendamentoRecorrenciaId!;
+    await repo.cancelarAgendamento(criados[1].id);
+
+    const serie = await repo.listarOcorrencias(serieId);
+
+    // Cancelar nao remove: o historico da serie continua completo.
+    expect(serie).toHaveLength(4);
+    expect(serie.filter((o) => o.status === 'cancelado')).toHaveLength(1);
+
+    const datas = serie.map((o) => o.dataHoraInicio.getTime());
+    expect([...datas].sort((a, b) => a - b)).toEqual(datas);
+  });
+
+  it('cancelar a serie preserva o que ja aconteceu', async () => {
+    const repo = new RepositorioFake(false);
+    const tutor = await repo.salvarTutor({
+      id: '',
+      nomeCompleto: 'Tutor',
+      endereco: null,
+      rg: null,
+      cpfCnpj: '123',
+      telefone: null,
+      email: null,
+    });
+    const animal = await repo.salvarAnimal({
+      id: '',
+      tutorId: tutor.id,
+      nome: 'Rex',
+      raca: null,
+      idade: null,
+      porte: null,
+      peso: null,
+      especie: null,
+      sexo: null,
+      castrado: null,
+      docil: null,
+      observacoes: null,
+    });
+
+    // Segundas de 03/08 a 31/08/2026: dias 03, 10, 17, 24, 31.
+    const inicio = new Date(2026, 7, 3);
+    const criados = await repo.criarAgendamento(
+      base({
+        animalIds: [animal.id],
+        tipo: 'creche',
+        dataHoraInicio: comHorario(inicio, '08:00'),
+        dataHoraFim: comHorario(fimDaJanela(inicio, 5), '18:00'),
+        status: 'confirmado',
+        recorrente: true,
+        diasSemanaRecorrencia: [1],
+        planoEstadia: {
+          ...planoVazio,
+          horarioEntrada: '08:00',
+          horarioSaida: '18:00',
+        },
+      }),
+    );
+    expect(criados).toHaveLength(5);
+    const serieId = criados[0].agendamentoRecorrenciaId!;
+
+    // Corte no dia 18: as duas primeiras (03 e 10) e a do dia 17 ja passaram.
+    const canceladas = await repo.cancelarSerie(serieId, new Date(2026, 7, 18));
+
+    expect(canceladas).toHaveLength(2);
+    expect(canceladas.map((o) => o.dataHoraInicio.getDate())).toEqual([24, 31]);
+
+    const serie = await repo.listarOcorrencias(serieId);
+    const passadas = serie.filter((o) => o.dataHoraInicio.getDate() <= 17);
+    expect(passadas.every((o) => o.status === 'confirmado')).toBe(true);
+  });
+
+  it('cancelar a serie duas vezes nao recancela nada', async () => {
+    const repo = new RepositorioFake();
+    const todos = await repo.listarAgendamentos(FILTRO_VAZIO);
+    const serieId = todos.find((a) => a.agendamentoRecorrenciaId)!
+      .agendamentoRecorrenciaId!;
+
+    const passado = new Date(2000, 0, 1);
+    const primeira = await repo.cancelarSerie(serieId, passado);
+    expect(primeira.length).toBeGreaterThan(0);
+
+    // Idempotente: nada sobrou para cancelar.
+    const segunda = await repo.cancelarSerie(serieId, passado);
+    expect(segunda).toHaveLength(0);
+  });
+
+  it('ignora ocorrencias de outras series', async () => {
+    const repo = new RepositorioFake();
+    const todos = await repo.listarAgendamentos(FILTRO_VAZIO);
+    const comSerie = todos.find((a) => a.agendamentoRecorrenciaId);
+    expect(comSerie).toBeDefined();
+
+    const serie = await repo.listarOcorrencias(
+      comSerie!.agendamentoRecorrenciaId!,
+    );
+    expect(serie.length).toBeGreaterThan(0);
+    for (const o of serie) {
+      expect(o.agendamentoRecorrenciaId).toBe(
+        comSerie!.agendamentoRecorrenciaId,
+      );
+    }
   });
 });
 

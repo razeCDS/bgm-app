@@ -30,9 +30,11 @@ describe('Chaveamento de repositorio', () => {
       'salvarFicha',
       'listarAgendamentos',
       'obterAgendamento',
+      'listarOcorrencias',
       'criarAgendamento',
       'atualizarAgendamento',
       'cancelarAgendamento',
+      'cancelarSerie',
     ] as const;
 
     const fake = new RepositorioFake(false);

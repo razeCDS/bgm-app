@@ -30,7 +30,6 @@ const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 interface Agendamento {
   id: string;
-  animal_id: string;
   tipo: 'visita' | 'hotel' | 'creche';
   data_hora_inicio: string;
   data_hora_fim: string | null;
@@ -174,12 +173,32 @@ async function pg(caminho: string, init: RequestInit = {}) {
   return r;
 }
 
-async function buscarAnimal(animalId: string): Promise<DadosAnimal | null> {
+/** Animais do agendamento, via juncao `agendamento_animais`. */
+async function buscarAnimais(agendamentoId: string): Promise<DadosAnimal[]> {
   const r = await pg(
-    `animais?id=eq.${animalId}&select=nome,observacoes,tutores(nome_completo,telefone)`,
+    `agendamento_animais?agendamento_id=eq.${agendamentoId}` +
+      `&select=animais(nome,observacoes,tutores(nome_completo,telefone))`,
   );
-  const linhas = (await r.json()) as DadosAnimal[];
-  return linhas[0] ?? null;
+  const linhas = (await r.json()) as { animais: DadosAnimal | null }[];
+  return linhas
+    .map((l) => l.animais)
+    .filter((a): a is DadosAnimal => a !== null);
+}
+
+/**
+ * Le o id do evento DIRETO do banco, ignorando o payload.
+ *
+ * O `pg_net` e assincrono: varias chamadas podem sair com o mesmo retrato do
+ * agendamento e todas acharem que nao ha evento ainda — foi o que gerou
+ * eventos duplicados no Google. Lendo aqui, quem chega depois faz PATCH em
+ * vez de criar outro.
+ */
+async function eventoAtual(agendamentoId: string): Promise<string | null> {
+  const r = await pg(
+    `agendamentos?id=eq.${agendamentoId}&select=google_calendar_event_id`,
+  );
+  const linhas = (await r.json()) as { google_calendar_event_id: string | null }[];
+  return linhas[0]?.google_calendar_event_id ?? null;
 }
 
 async function registrarSync(
@@ -196,14 +215,21 @@ async function registrarSync(
 
 // ── Montagem do evento ────────────────────────────────────────────────────
 
-function montarEvento(a: Agendamento, animal: DadosAnimal | null) {
-  const nome = animal?.nome ?? 'Animal';
-  const tutor = animal?.tutores;
+function montarEvento(a: Agendamento, animais: DadosAnimal[]) {
+  const nomes = animais.map((x) => x.nome).join(', ') || 'Animal';
+  // O tutor e o mesmo para todos os caes do agendamento.
+  const tutor = animais[0]?.tutores ?? null;
+
+  const sobreCaes = animais
+    .filter((x) => x.observacoes)
+    .map((x) => `${x.nome}: ${x.observacoes}`)
+    .join('\n');
 
   const descricao = [
     tutor ? `Tutor: ${tutor.nome_completo}` : null,
     tutor?.telefone ? `Telefone: ${tutor.telefone}` : null,
-    animal?.observacoes ? `\nSobre o cão: ${animal.observacoes}` : null,
+    animais.length > 1 ? `\nCães (${animais.length}): ${nomes}` : null,
+    sobreCaes ? `\nSobre:\n${sobreCaes}` : null,
     a.observacoes ? `\nObservações: ${a.observacoes}` : null,
   ]
     .filter(Boolean)
@@ -216,7 +242,7 @@ function montarEvento(a: Agendamento, animal: DadosAnimal | null) {
     new Date(new Date(inicio).getTime() + 60 * 60 * 1000).toISOString();
 
   return {
-    summary: `${nome} — ${rotuloTipo[a.tipo]}`,
+    summary: `${nomes} — ${rotuloTipo[a.tipo]}`,
     description: descricao || undefined,
     start: { dateTime: inicio, timeZone: FUSO },
     end: { dateTime: fim, timeZone: FUSO },
@@ -271,7 +297,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const token = await obterAccessToken(contaServico);
-    const eventoId = agendamento.google_calendar_event_id;
+    const eventoId = await eventoAtual(agendamento.id);
 
     // ── Cancelado: apaga do Google ──
     if (agendamento.status === 'cancelado') {
@@ -293,8 +319,15 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Ativo: cria ou atualiza ──
-    const animal = await buscarAnimal(agendamento.animal_id);
-    const corpo = JSON.stringify(montarEvento(agendamento, animal));
+    const animais = await buscarAnimais(agendamento.id);
+
+    // Sem caes vinculados ainda: nada util a espelhar. O trigger da juncao
+    // dispara assim que os vinculos entram.
+    if (animais.length === 0) {
+      return Response.json({ ignorado: 'sem animais vinculados ainda' });
+    }
+
+    const corpo = JSON.stringify(montarEvento(agendamento, animais));
 
     // Se ja existe evento, faz PATCH — assim um webhook repetido nao
     // duplica o compromisso na agenda.

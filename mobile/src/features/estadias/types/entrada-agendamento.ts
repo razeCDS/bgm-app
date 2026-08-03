@@ -18,7 +18,8 @@ import type {
  * Agrupa o agendamento e seus relacionamentos 1:1, gravados juntos.
  */
 export interface EntradaAgendamento {
-  animalId: string;
+  /** Um ou mais animais do mesmo tutor. */
+  animalIds: string[];
   tipo: TipoAgendamento;
   dataHoraInicio: Date;
   dataHoraFim: Date | null;
@@ -38,7 +39,7 @@ export const geraRecorrencia = (e: EntradaAgendamento) =>
 
 export function entradaDe(a: Agendamento): EntradaAgendamento {
   return {
-    animalId: a.animalId,
+    animalIds: a.animalIds,
     tipo: a.tipo,
     dataHoraInicio: a.dataHoraInicio,
     dataHoraFim: a.dataHoraFim,
@@ -127,8 +128,8 @@ export function comHorario(base: Date, hora: string | null): Date {
  * Retorna a mensagem do primeiro erro encontrado, ou `null` se valido.
  */
 export function validarAgendamento(e: EntradaAgendamento): string | null {
-  if (!e.animalId) {
-    return 'Selecione o animal.';
+  if (e.animalIds.length === 0) {
+    return 'Selecione ao menos um animal.';
   }
 
   if (e.dataHoraFim && e.dataHoraFim < e.dataHoraInicio) {
@@ -137,8 +138,19 @@ export function validarAgendamento(e: EntradaAgendamento): string | null {
 
   // Plano de estadia (rotina diaria) e obrigatorio apenas na Creche.
   // O Hotel pode ter apenas o valor da estadia — ou nem isso.
-  if (exigePlanoEstadia(e.tipo) && !e.planoEstadia) {
-    return `Plano de estadia e obrigatorio para ${rotuloTipo[e.tipo]}.`;
+  if (exigePlanoEstadia(e.tipo)) {
+    if (!e.planoEstadia) {
+      return `Plano de estadia e obrigatorio para ${rotuloTipo[e.tipo]}.`;
+    }
+    // A Creche nao tem secao de Periodo: estes horarios sao a UNICA fonte da
+    // hora de cada ocorrencia. Sem eles tudo cai a meia-noite — e, pior, em
+    // silencio, porque nada mais reclama.
+    if (!e.planoEstadia.horarioEntrada) {
+      return 'Informe o horario de entrada no plano de estadia.';
+    }
+    if (!e.planoEstadia.horarioSaida) {
+      return 'Informe o horario de saida no plano de estadia.';
+    }
   }
 
   // Visita nao registra estadia.

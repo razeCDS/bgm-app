@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ChipStatus, ChipTipo } from '../../../components/chips';
@@ -11,10 +12,69 @@ import type { Agendamento } from '../types/modelos';
 import { filtroEstaVazio } from '../types/modelos';
 import { PainelFiltros } from './painel-filtros';
 
+/**
+ * Uma linha da lista: ou um agendamento solto, ou uma serie recorrente
+ * inteira representada por uma unica entrada.
+ */
+interface Linha {
+  chave: string;
+  /** A ocorrencia que da o rosto da linha (a proxima ainda por vir). */
+  destaque: Agendamento;
+  /** > 1 quando a linha resume uma serie. */
+  total: number;
+  restantes: number;
+}
+
+/**
+ * Colapsa series recorrentes em uma linha so.
+ *
+ * Uma creche de 3x por semana durante 3 meses gera ~36 ocorrencias; lista-las
+ * individualmente afogava todo o resto. A linha mostra a proxima ocorrencia
+ * futura — nao a primeira da serie, que costuma ja ter passado.
+ */
+function agruparSeries(agendamentos: Agendamento[]): Linha[] {
+  const agora = Date.now();
+  const series = new Map<string, Agendamento[]>();
+  const linhas: Linha[] = [];
+
+  for (const a of agendamentos) {
+    const serie = a.agendamentoRecorrenciaId;
+    if (!serie) {
+      linhas.push({ chave: a.id, destaque: a, total: 1, restantes: 0 });
+      continue;
+    }
+    const atual = series.get(serie);
+    if (atual) atual.push(a);
+    else series.set(serie, [a]);
+  }
+
+  for (const [serie, itens] of series) {
+    const ordenados = [...itens].sort(
+      (x, y) => x.dataHoraInicio.getTime() - y.dataHoraInicio.getTime(),
+    );
+    const ativas = ordenados.filter((a) => a.status !== 'cancelado');
+    const futuras = ativas.filter((a) => a.dataHoraInicio.getTime() >= agora);
+    linhas.push({
+      chave: serie,
+      // Toda a serie no passado: mostramos a ultima, para nao sumir da lista.
+      destaque: futuras[0] ?? ativas[ativas.length - 1] ?? ordenados[0],
+      total: ordenados.length,
+      restantes: futuras.length,
+    });
+  }
+
+  return linhas.sort(
+    (a, b) =>
+      a.destaque.dataHoraInicio.getTime() - b.destaque.dataHoraInicio.getTime(),
+  );
+}
+
 export function AbaAgendamentos() {
   const router = useRouter();
   const { data, isPending, error, refetch, isRefetching } = useAgendamentos();
   const { filtro, limparTudo } = useFiltroAgendamentos();
+
+  const linhas = useMemo(() => agruparSeries(data ?? []), [data]);
 
   return (
     <View style={estilos.tela}>
@@ -24,7 +84,7 @@ export function AbaAgendamentos() {
         <Carregando />
       ) : error ? (
         <EstadoErro mensagem={String(error)} aoTentarNovamente={() => refetch()} />
-      ) : data.length === 0 ? (
+      ) : linhas.length === 0 ? (
         <EstadoVazio
           icone="📭"
           titulo={
@@ -45,12 +105,12 @@ export function AbaAgendamentos() {
         />
       ) : (
         <FlatList
-          data={data}
-          keyExtractor={(a) => a.id}
+          data={linhas}
+          keyExtractor={(l) => l.chave}
           contentContainerStyle={s.lista}
           refreshing={isRefetching}
           onRefresh={refetch}
-          renderItem={({ item }) => <Cartao agendamento={item} />}
+          renderItem={({ item }) => <Cartao linha={item} />}
         />
       )}
 
@@ -64,43 +124,59 @@ export function AbaAgendamentos() {
   );
 }
 
-function Cartao({ agendamento: a }: { agendamento: Agendamento }) {
+function Cartao({ linha }: { linha: Linha }) {
   const router = useRouter();
+  const a = linha.destaque;
   const cancelado = a.status === 'cancelado';
+  const serie = linha.total > 1;
 
   return (
     <Pressable
       style={[estilos.cartao, s.cartao]}
       onPress={() => router.push(`/estadias/agendamento/${a.id}`)}
     >
+      {/*
+        O tutor virou o principal — e ele quem reserva. Os caes vem logo
+        abaixo, porque um mesmo agendamento pode atender varios.
+      */}
       <View style={s.topo}>
         <Text style={[s.nome, cancelado && s.nomeCancelado]}>
-          {a.animal?.nome ?? 'Animal'}
+          {a.animais?.[0]?.tutor?.nomeCompleto ?? 'Tutor'}
         </Text>
         <ChipStatus status={a.status} />
       </View>
 
-      {a.animal?.tutor ? (
-        <Text style={s.tutor}>Tutor: {a.animal.tutor.nomeCompleto}</Text>
+      {a.animais && a.animais.length > 0 ? (
+        <Text style={s.tutor}>
+          {a.animais.length > 1 ? 'Cães: ' : 'Cão: '}
+          {a.animais.map((c) => c.nome).join(', ')}
+        </Text>
       ) : null}
 
       <View style={s.meta}>
         <ChipTipo tipo={a.tipo} />
         <Text style={s.periodo}>
+          {serie ? 'Próxima: ' : ''}
           {formatarIntervalo(a.dataHoraInicio, a.dataHoraFim)}
         </Text>
       </View>
 
-      {a.agendamentoRecorrenciaId || a.planoEstadia?.valorTotal != null ? (
+      {serie || a.planoEstadia?.valorTotal != null ? (
         <View style={s.rodape}>
-          {a.agendamentoRecorrenciaId ? (
-            <Text style={s.serie}>🔁 Série recorrente</Text>
+          {serie ? (
+            <Text style={s.serie}>
+              🔁 {linha.total} ocorrências
+              {linha.restantes > 0 ? ` · ${linha.restantes} a vir` : ' · encerrada'}
+            </Text>
           ) : (
             <View />
           )}
           {a.planoEstadia?.valorTotal != null ? (
+            // Na Creche o valor e da diaria; sem o sufixo, o numero de uma
+            // ocorrencia parece o total da serie.
             <Text style={s.valor}>
               {formatarMoeda(a.planoEstadia.valorTotal)}
+              {a.tipo === 'creche' ? '/dia' : ''}
             </Text>
           ) : null}
         </View>

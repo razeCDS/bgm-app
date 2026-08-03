@@ -249,11 +249,15 @@ const umDe = (bruto: unknown): Linha | null => {
 export const agendamentoDeLinha = (l: Linha): Agendamento => {
   const plano = umDe(l.planos_estadia);
   const pertences = umDe(l.pertences_deixados);
-  const animal = umDe(l.animais);
+  // Vem do embed de `agendamento_animais`, que traz cada animal aninhado.
+  const vinculos = (l.agendamento_animais ?? []) as any[];
+  const animais = vinculos
+    .map((v) => (v?.animais ? animalDeLinha(v.animais) : null))
+    .filter((a): a is NonNullable<typeof a> => a !== null);
 
   return {
     id: l.id,
-    animalId: l.animal_id,
+    animalIds: vinculos.map((v) => v.animal_id as string),
     tipo: l.tipo as TipoAgendamento,
     dataHoraInicio: new Date(l.data_hora_inicio),
     dataHoraFim: data(l.data_hora_fim),
@@ -263,7 +267,7 @@ export const agendamentoDeLinha = (l: Linha): Agendamento => {
     agendamentoRecorrenciaId: l.agendamento_recorrencia_id ?? null,
     observacoes: l.observacoes ?? null,
     googleCalendarEventId: l.google_calendar_event_id ?? null,
-    animal: animal ? animalDeLinha(animal) : null,
+    animais,
     planoEstadia: plano ? planoDeLinha(plano) : null,
     pertencesDeixados: pertences ? pertencesDeLinha(pertences) : null,
   };

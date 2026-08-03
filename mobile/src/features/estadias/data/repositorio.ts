@@ -31,6 +31,11 @@ export interface EstadiasRepositorio {
   listarAgendamentos(filtro: FiltroAgendamentos): Promise<Agendamento[]>;
   obterAgendamento(id: string): Promise<Agendamento>;
   /**
+   * Todas as ocorrencias de uma serie, em ordem cronologica — inclusive as
+   * canceladas, para a equipe enxergar o historico completo da recorrencia.
+   */
+  listarOcorrencias(recorrenciaId: string): Promise<Agendamento[]>;
+  /**
    * Cria o agendamento. Quando a entrada gera recorrencia, produz uma
    * ocorrencia por dia marcado no periodo e devolve todas (compartilhando
    * o mesmo `agendamentoRecorrenciaId`).
@@ -42,4 +47,15 @@ export interface EstadiasRepositorio {
   ): Promise<Agendamento>;
   /** Cancelamento e mudanca de status — o registro nunca e apagado. */
   cancelarAgendamento(id: string): Promise<Agendamento>;
+  /**
+   * Cancela de uma vez as ocorrencias da serie que comecam em `aPartirDe` ou
+   * depois. As anteriores ficam intactas: elas ja aconteceram, e reescreve-las
+   * apagaria o historico de frequencia do animal.
+   *
+   * Devolve as ocorrencias efetivamente canceladas.
+   */
+  cancelarSerie(
+    recorrenciaId: string,
+    aPartirDe: Date,
+  ): Promise<Agendamento[]>;
 }

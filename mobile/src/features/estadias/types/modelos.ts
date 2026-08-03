@@ -113,7 +113,18 @@ export interface PlanoEstadia {
   horarioEntrada: string | null;
   horarioSaida: string | null;
   formaPagamento: FormaPagamento | null;
-  /** Campo informativo — nao ha processamento de pagamento nesta fase. */
+  /**
+   * Campo informativo — nao ha processamento de pagamento nesta fase.
+   *
+   * SEMANTICA POR TIPO:
+   *  - Hotel: valor total da estadia inteira.
+   *  - Creche: valor da DIARIA.
+   *
+   * A diferenca importa porque o plano e 1:1 com o agendamento, e numa serie
+   * recorrente ele e copiado para cada ocorrencia. Se guardasse o valor do
+   * pacote, somar as ocorrencias devolveria o total multiplicado pelo numero
+   * de dias. Valor de pacote fechado ainda nao e modelado.
+   */
   valorTotal: number | null;
 }
 
@@ -136,7 +147,14 @@ export interface PertencesDeixados {
 /** Tabela `agendamentos`. */
 export interface Agendamento {
   id: string;
-  animalId: string;
+  /**
+   * Animais atendidos, via `agendamento_animais`.
+   *
+   * Um tutor pode reservar para mais de um cao no mesmo periodo, entao o
+   * vinculo e N:N. A protecao contra dupla reserva mora na juncao
+   * (`excl_animal_sem_sobreposicao_juncao`) e continua valendo por animal.
+   */
+  animalIds: string[];
   tipo: TipoAgendamento;
   dataHoraInicio: Date;
   /** Opcional no banco: existe agendamento sem data final definida. */
@@ -153,7 +171,7 @@ export interface Agendamento {
   /** Reservado para a fase de integracao com o Google Agenda. */
   googleCalendarEventId: string | null;
   // Relacionamentos embutidos
-  animal?: Animal | null;
+  animais?: Animal[];
   planoEstadia?: PlanoEstadia | null;
   pertencesDeixados?: PertencesDeixados | null;
 }

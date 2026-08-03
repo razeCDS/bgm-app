@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AbaAgenda } from '../../src/features/estadias/components/aba-agenda';
 import { AbaAgendamentos } from '../../src/features/estadias/components/aba-agendamentos';
 import { AbaCaes } from '../../src/features/estadias/components/aba-caes';
 import { cores } from '../../src/theme/cores';
 import { espaco } from '../../src/theme/estilos';
 
-type Aba = 'agendamentos' | 'agenda' | 'caes';
+// A visao de calendario saiu: o espelhamento no Google Agenda cumpre esse
+// papel, e manter as duas obrigaria a reimplementar no app cada regra de
+// exibicao que o Google ja resolve.
+type Aba = 'agendamentos' | 'caes';
 
 /** Modulo BGM Estadias: navegacao em abas. */
 export default function TelaEstadias() {
@@ -22,12 +24,6 @@ export default function TelaEstadias() {
           aoTocar={() => setAba('agendamentos')}
         />
         <Botao
-          texto="Agenda"
-          icone="📅"
-          ativo={aba === 'agenda'}
-          aoTocar={() => setAba('agenda')}
-        />
-        <Botao
           texto="Cães"
           icone="🐾"
           ativo={aba === 'caes'}
@@ -35,13 +31,7 @@ export default function TelaEstadias() {
         />
       </View>
 
-      {aba === 'agendamentos' ? (
-        <AbaAgendamentos />
-      ) : aba === 'agenda' ? (
-        <AbaAgenda />
-      ) : (
-        <AbaCaes />
-      )}
+      {aba === 'agendamentos' ? <AbaAgendamentos /> : <AbaCaes />}
     </View>
   );
 }

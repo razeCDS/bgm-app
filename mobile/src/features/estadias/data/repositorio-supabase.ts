@@ -1,5 +1,7 @@
 import { exigirSupabase } from '../../../lib/supabase';
 import {
+  ERRO_SOBREPOSICAO,
+  ErroValidacao,
   garantirValido,
   geraRecorrencia,
   type EntradaAgendamento,
@@ -38,6 +40,68 @@ import type { EstadiasRepositorio } from './repositorio';
  *   - `01_rls_policies.sql`      — RLS liberando `authenticated`
  *   - `02_fn_gerar_ocorrencias.sql` — RPC de recorrencia
  */
+/**
+ * Traduz violacoes de constraint do Postgres em mensagens que fazem sentido
+ * para a equipe da creche.
+ *
+ * As regras vivem no banco (ver `supabase/04_regras_negocio.sql`) justamente
+ * para valerem em qualquer caminho de escrita. Sem esta traducao o usuario
+ * veria algo como "conflicting key value violates exclusion constraint".
+ */
+function traduzirErro(erro: unknown): Error {
+  const e = erro as { code?: string; message?: string } | null;
+  const codigo = e?.code ?? '';
+  const texto = e?.message ?? String(erro);
+
+  // 23P01 — exclusion_violation
+  if (codigo === '23P01' || texto.includes('excl_animal_sem_sobreposicao')) {
+    return new ErroValidacao(ERRO_SOBREPOSICAO);
+  }
+
+  // 23514 — check_violation
+  if (codigo === '23514') {
+    if (texto.includes('chk_periodo_coerente')) {
+      return new ErroValidacao(
+        'A data/hora final não pode ser anterior à inicial.',
+      );
+    }
+    if (texto.includes('chk_recorrencia_so_creche')) {
+      return new ErroValidacao(
+        'Recorrência só é permitida para agendamentos de Creche.',
+      );
+    }
+    if (texto.includes('chk_recorrencia_tem_dias')) {
+      return new ErroValidacao(
+        'Informe ao menos um dia da semana para a recorrência.',
+      );
+    }
+    if (texto.includes('chk_recorrencia_tem_fim')) {
+      return new ErroValidacao(
+        'Informe a data final do período da recorrência.',
+      );
+    }
+    if (texto.includes('chk_idade_numerica')) {
+      return new ErroValidacao('A idade deve ser um número.');
+    }
+    if (texto.includes('chk_valor_nao_negativo')) {
+      return new ErroValidacao('O valor não pode ser negativo.');
+    }
+    // Trigger de Visita sem estadia usa este mesmo codigo.
+    if (texto.includes('Visita')) {
+      return new ErroValidacao(
+        'Agendamento do tipo Visita não possui plano de estadia nem pertences.',
+      );
+    }
+  }
+
+  // 23502 — not_null_violation
+  if (codigo === '23502' && texto.includes('cpf_cnpj')) {
+    return new ErroValidacao('Informe o CPF/CNPJ do tutor.');
+  }
+
+  return erro instanceof Error ? erro : new Error(texto);
+}
+
 export class RepositorioSupabase implements EstadiasRepositorio {
   private get db() {
     return exigirSupabase();
@@ -54,7 +118,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .from('tutores')
       .select()
       .order('nome_completo');
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return (data ?? []).map(tutorDeLinha);
   }
 
@@ -64,7 +128,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       ? this.db.from('tutores').update(linha).eq('id', tutor.id)
       : this.db.from('tutores').insert(linha);
     const { data, error } = await q.select().single();
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return tutorDeLinha(data);
   }
 
@@ -75,7 +139,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     const termo = (busca ?? '').trim();
     if (termo) q = q.or(`nome.ilike.%${termo}%,raca.ilike.%${termo}%`);
     const { data, error } = await q.order('nome');
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return (data ?? []).map(animalDeLinha);
   }
 
@@ -85,7 +149,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .select('*, tutores(*)')
       .eq('id', animalId)
       .single();
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     const animal = animalDeLinha(animalLinha);
 
     const [vet, anam, termo, contatos] = await Promise.all([
@@ -111,7 +175,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       ? this.db.from('animais').update(linha).eq('id', animal.id)
       : this.db.from('animais').insert(linha);
     const { data, error } = await q.select('*, tutores(*)').single();
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return animalDeLinha(data);
   }
 
@@ -125,19 +189,19 @@ export class RepositorioSupabase implements EstadiasRepositorio {
         .upsert(veterinarioParaLinha(ficha.veterinario), {
           onConflict: 'animal_id',
         });
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
     if (ficha.anamnese) {
       const { error } = await this.db
         .from('anamneses')
         .upsert(anamneseParaLinha(ficha.anamnese), { onConflict: 'animal_id' });
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
     if (ficha.termo) {
       const { error } = await this.db
         .from('termos_consentimento')
         .upsert(termoParaLinha(ficha.termo), { onConflict: 'animal_id' });
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
 
     // Contatos sao 1:N: substitui o conjunto inteiro.
@@ -145,13 +209,13 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .from('contatos_emergencia')
       .delete()
       .eq('animal_id', animalId);
-    if (del.error) throw del.error;
+    if (del.error) throw traduzirErro(del.error);
 
     if (ficha.contatos.length > 0) {
       const { error } = await this.db
         .from('contatos_emergencia')
         .insert(ficha.contatos.map(contatoParaLinha));
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
 
     return this.obterFicha(animalId);
@@ -190,7 +254,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     }
 
     const { data, error } = await q.order('data_hora_inicio');
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return (data ?? []).map((l) => agendamentoDeLinha(l as any));
   }
 
@@ -200,7 +264,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .select(this.selectAgendamento)
       .eq('id', id)
       .single();
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return agendamentoDeLinha(data as any);
   }
 
@@ -227,7 +291,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
             : null,
         },
       );
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
 
       const lista = (ids ?? []) as string[];
       if (lista.length === 0) return [];
@@ -237,7 +301,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
         .select(this.selectAgendamento)
         .in('id', lista)
         .order('data_hora_inicio');
-      if (erroBusca) throw erroBusca;
+      if (erroBusca) throw traduzirErro(erroBusca);
       return (data ?? []).map((l) => agendamentoDeLinha(l as any));
     }
 
@@ -255,7 +319,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
 
     const id = data.id as string;
     await this.gravarRelacionados(id, entrada);
@@ -279,7 +343,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
         observacoes: entrada.observacoes,
       })
       .eq('id', id);
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
 
     await this.db.from('planos_estadia').delete().eq('agendamento_id', id);
     await this.db.from('pertences_deixados').delete().eq('agendamento_id', id);
@@ -297,14 +361,14 @@ export class RepositorioSupabase implements EstadiasRepositorio {
         ...planoParaLinha(entrada.planoEstadia),
         agendamento_id: agendamentoId,
       });
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
     if (entrada.pertencesDeixados) {
       const { error } = await this.db.from('pertences_deixados').insert({
         ...pertencesParaLinha(entrada.pertencesDeixados),
         agendamento_id: agendamentoId,
       });
-      if (error) throw error;
+      if (error) throw traduzirErro(error);
     }
   }
 
@@ -314,7 +378,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
       .from('agendamentos')
       .update({ status: 'cancelado' })
       .eq('id', id);
-    if (error) throw error;
+    if (error) throw traduzirErro(error);
     return this.obterAgendamento(id);
   }
 }

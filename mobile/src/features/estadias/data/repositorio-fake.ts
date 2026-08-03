@@ -1,8 +1,11 @@
 import {
+  ERRO_SOBREPOSICAO,
   ErroValidacao,
   garantirValido,
   geraRecorrencia,
   gerarOcorrencias,
+  periodoOcupado,
+  periodosSobrepoem,
   type EntradaAgendamento,
 } from '../types/entrada-agendamento';
 import type {
@@ -188,16 +191,54 @@ export class RepositorioFake implements EstadiasRepositorio {
     return this.hidratar(a);
   }
 
+  /**
+   * O mesmo animal nao pode ocupar dois periodos que se cruzam — a mesma
+   * regra que a constraint `excl_animal_sem_sobreposicao` impoe no banco.
+   * Cancelados nao contam.
+   */
+  private conflita(
+    animalId: string,
+    inicio: Date,
+    fim: Date | null,
+    ignorarId?: string,
+  ): boolean {
+    const novo = periodoOcupado(inicio, fim);
+    return this.agendamentos.some((a) => {
+      if (a.id === ignorarId) return false;
+      if (a.animalId !== animalId) return false;
+      if (a.status === 'cancelado') return false;
+      return periodosSobrepoem(
+        novo,
+        periodoOcupado(a.dataHoraInicio, a.dataHoraFim),
+      );
+    });
+  }
+
   async criarAgendamento(entrada: EntradaAgendamento): Promise<Agendamento[]> {
     garantirValido(entrada);
     await atraso();
 
     if (!geraRecorrencia(entrada)) {
+      if (this.conflita(entrada.animalId, entrada.dataHoraInicio, entrada.dataHoraFim)) {
+        throw new ErroValidacao(ERRO_SOBREPOSICAO);
+      }
       return [this.inserirUm(entrada, entrada.dataHoraInicio, entrada.dataHoraFim)];
     }
 
+    const ocorrencias = gerarOcorrencias(entrada);
+
+    // Confere TODAS antes de gravar QUALQUER uma: no banco a RPC roda em
+    // transacao unica, entao uma ocorrencia conflitante derruba a serie
+    // inteira. Sem esta checagem previa, o modo em memoria deixaria metade
+    // da serie gravada — divergindo do comportamento real.
+    for (const { inicio, fim } of ocorrencias) {
+      if (this.conflita(entrada.animalId, inicio, fim)) {
+        throw new ErroValidacao(ERRO_SOBREPOSICAO);
+      }
+    }
+
     const serieId = uid();
-    return gerarOcorrencias(entrada).map(({ inicio, fim }) =>
+    return ocorrencias.map(({ inicio, fim }) =>
       this.inserirUm(entrada, inicio, fim, serieId),
     );
   }
@@ -246,6 +287,20 @@ export class RepositorioFake implements EstadiasRepositorio {
 
     const i = this.agendamentos.findIndex((a) => a.id === id);
     if (i < 0) throw new ErroValidacao('Agendamento nao encontrado.');
+
+    // Ignora o proprio registro: mover um agendamento nao pode colidir
+    // consigo mesmo.
+    if (
+      entrada.status !== 'cancelado' &&
+      this.conflita(
+        entrada.animalId,
+        entrada.dataHoraInicio,
+        entrada.dataHoraFim,
+        id,
+      )
+    ) {
+      throw new ErroValidacao(ERRO_SOBREPOSICAO);
+    }
 
     this.agendamentos[i] = {
       ...this.agendamentos[i],

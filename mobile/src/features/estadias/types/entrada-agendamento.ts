@@ -60,6 +60,38 @@ export class ErroValidacao extends Error {
 }
 
 /**
+ * Mensagem unica para a dupla reserva, usada pelas duas implementacoes do
+ * repositorio — o banco barra via constraint `excl_animal_sem_sobreposicao`,
+ * e o repositorio em memoria reproduz a mesma regra.
+ */
+export const ERRO_SOBREPOSICAO =
+  'Este animal já tem outro agendamento neste período.';
+
+/**
+ * Intervalo que um agendamento ocupa na agenda do animal.
+ *
+ * Espelha a funcao `periodo_agendamento` do Postgres: fim nulo assume uma
+ * hora, e o intervalo nunca e vazio (senao um agendamento com fim igual ao
+ * inicio nao colidiria com nada e escaparia da protecao).
+ */
+export function periodoOcupado(
+  inicio: Date,
+  fim: Date | null,
+): [Date, Date] {
+  const minimo = new Date(inicio.getTime() + 60_000);
+  const bruto = fim ?? new Date(inicio.getTime() + 3_600_000);
+  return [inicio, bruto > minimo ? bruto : minimo];
+}
+
+/** Dois intervalos se cruzam? (fim exclusivo, como o `tstzrange` padrao) */
+export function periodosSobrepoem(
+  a: [Date, Date],
+  b: [Date, Date],
+): boolean {
+  return a[0] < b[1] && b[0] < a[1];
+}
+
+/**
  * Regras de negocio do agendamento.
  *
  * O Termo de Consentimento **nao** entra aqui de proposito: seus itens sao

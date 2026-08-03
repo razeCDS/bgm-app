@@ -12,5 +12,11 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    // Edge Functions rodam em Deno, com globais e resolucao de import
+    // proprios. Sao verificadas pelo `deno check`, nao por este tsconfig.
+    "supabase/functions"
   ]
 }

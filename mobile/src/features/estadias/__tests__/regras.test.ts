@@ -1,5 +1,7 @@
 import { RepositorioFake } from '../data/repositorio-fake';
 import {
+  comHorario,
+  fimDaJanela,
   gerarOcorrencias,
   validarAgendamento,
   type EntradaAgendamento,
@@ -159,6 +161,71 @@ describe('Recorrencia', () => {
     const lista = await repo.listarAgendamentos(FILTRO_VAZIO);
     expect(lista.filter((a) => a.status === 'cancelado')).toHaveLength(1);
     expect(lista.filter((a) => a.status === 'confirmado')).toHaveLength(1);
+  });
+});
+
+describe('Janela da recorrencia por semanas', () => {
+  it('1 semana termina 6 dias depois, nao 7', () => {
+    // Segunda 03/08/2026 + 1 semana => domingo 09/08. Se fosse +7 dias,
+    // cairia na segunda 10/08 e geraria uma segunda-feira extra.
+    const fim = fimDaJanela(new Date(2026, 7, 3), 1);
+    expect(fim.getDate()).toBe(9);
+    expect(fim.getMonth()).toBe(7);
+  });
+
+  it('N semanas com um dia marcado geram exatamente N ocorrencias', () => {
+    const inicio = new Date(2026, 7, 3); // segunda-feira
+    for (const semanas of [1, 4, 12]) {
+      const ocorrencias = gerarOcorrencias({
+        ...base({
+          tipo: 'creche',
+          dataHoraInicio: comHorario(inicio, '08:00'),
+          dataHoraFim: comHorario(fimDaJanela(inicio, semanas), '18:00'),
+          recorrente: true,
+          diasSemanaRecorrencia: [1],
+          planoEstadia: { ...planoVazio, horarioEntrada: '08:00', horarioSaida: '18:00' },
+        }),
+      });
+      expect(ocorrencias).toHaveLength(semanas);
+    }
+  });
+
+  it('tres dias por semana em 4 semanas geram 12 ocorrencias', () => {
+    const inicio = new Date(2026, 7, 3);
+    const ocorrencias = gerarOcorrencias(
+      base({
+        tipo: 'creche',
+        dataHoraInicio: comHorario(inicio, '08:00'),
+        dataHoraFim: comHorario(fimDaJanela(inicio, 4), '18:00'),
+        recorrente: true,
+        diasSemanaRecorrencia: [1, 3, 5],
+        planoEstadia: { ...planoVazio, horarioEntrada: '08:00', horarioSaida: '18:00' },
+      }),
+    );
+    expect(ocorrencias).toHaveLength(12);
+  });
+
+  it('o horario vem do plano, nao da data informada', () => {
+    const inicio = new Date(2026, 7, 3, 23, 45); // hora irrelevante
+    const [primeira] = gerarOcorrencias(
+      base({
+        tipo: 'creche',
+        dataHoraInicio: comHorario(inicio, '07:30'),
+        dataHoraFim: comHorario(fimDaJanela(inicio, 1), '17:15'),
+        recorrente: true,
+        diasSemanaRecorrencia: [1],
+        planoEstadia: { ...planoVazio, horarioEntrada: '07:30', horarioSaida: '17:15' },
+      }),
+    );
+    expect(primeira.inicio.getHours()).toBe(7);
+    expect(primeira.inicio.getMinutes()).toBe(30);
+    expect(primeira.fim?.getHours()).toBe(17);
+  });
+
+  it('comHorario ignora hora ausente sem virar data invalida', () => {
+    const d = comHorario(new Date(2026, 7, 3, 14, 20), null);
+    expect(d.getHours()).toBe(0);
+    expect(d.getDate()).toBe(3);
   });
 });
 

@@ -28,7 +28,10 @@ import {
   useCancelarAgendamento,
   useCriarAgendamento,
 } from '../hooks';
+import { formatarData } from '../../../lib/formatadores';
 import {
+  comHorario,
+  fimDaJanela,
   gerarOcorrencias,
   validarAgendamento,
   type EntradaAgendamento,
@@ -80,6 +83,8 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   const [fim, setFim] = useState<Date | null>(null);
   const [recorrente, setRecorrente] = useState(false);
   const [dias, setDias] = useState<DiaSemana[]>([]);
+  // Creche recorrente: a janela e informada em semanas, nao com data final.
+  const [semanas, setSemanas] = useState('4');
   const [observacoes, setObservacoes] = useState('');
 
   // Plano (creche)
@@ -119,6 +124,17 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
     setFim(a.dataHoraFim);
     setRecorrente(a.recorrente);
     setDias(a.diasSemanaRecorrencia);
+    if (a.recorrente && a.dataHoraFim) {
+      // A duracao nao e persistida: as ocorrencias sao a verdade. Ao editar,
+      // reconstruimos as semanas a partir da janela original.
+      const dia = 86_400_000;
+      const dias = Math.round(
+        (new Date(a.dataHoraFim).setHours(0, 0, 0, 0) -
+          new Date(a.dataHoraInicio).setHours(0, 0, 0, 0)) /
+          dia,
+      );
+      setSemanas(String(Math.max(1, Math.ceil((dias + 1) / 7))));
+    }
     setObservacoes(a.observacoes ?? '');
 
     const p = a.planoEstadia;
@@ -148,6 +164,9 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   const comEstadia = temEstadia(tipo);
   const comRecorrencia = permiteRecorrencia(tipo);
 
+  const numeroSemanas = Number(semanas);
+  const semanasOk = Number.isInteger(numeroSemanas) && numeroSemanas > 0;
+
   function montarEntrada(): EntradaAgendamento {
     const valor = Number(valorTotal.replace(',', '.'));
     const valorOk = valorTotal.trim() !== '' && !Number.isNaN(valor);
@@ -176,11 +195,25 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
       };
     }
 
+    // A Creche nao tem secao de Periodo: o horario vem do plano, e a janela
+    // da recorrencia sai da duracao em semanas. Manter os dois lugares para
+    // informar horario so criava divergencia — valia sempre o do plano.
+    let dataInicio = inicio;
+    let dataFim = fim;
+    if (comPlano) {
+      dataInicio = comHorario(inicio, horaEntrada);
+      dataFim = recorrente
+        ? comHorario(fimDaJanela(inicio, numeroSemanas), horaSaida)
+        : horaSaida
+          ? comHorario(inicio, horaSaida)
+          : null;
+    }
+
     return {
       animalId: animalId ?? '',
       tipo,
-      dataHoraInicio: inicio,
-      dataHoraFim: fim,
+      dataHoraInicio: dataInicio,
+      dataHoraFim: dataFim,
       status,
       recorrente: recorrente && comRecorrencia,
       diasSemanaRecorrencia: comRecorrencia ? dias : [],
@@ -204,6 +237,13 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   }
 
   async function salvar() {
+    if (comPlano && recorrente && !semanasOk) {
+      return Alert.alert(
+        'Verifique os dados',
+        'Informe a duração da recorrência em semanas (número inteiro maior que zero).',
+      );
+    }
+
     const entrada = montarEntrada();
     const erro = validarAgendamento(entrada);
     if (erro) return Alert.alert('Verifique os dados', erro);
@@ -251,7 +291,7 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   }
 
   const previsao =
-    recorrente && comRecorrencia && fim && dias.length > 0
+    recorrente && comRecorrencia && semanasOk && dias.length > 0
       ? gerarOcorrencias(montarEntrada()).length
       : 0;
 
@@ -296,29 +336,53 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
           />
         </Secao>
 
-        <Secao titulo="Período">
-          <SeletorDataHora rotulo="Início *" valor={inicio} aoMudar={setInicio} />
-          <SeletorDataHora
-            rotulo="Fim"
-            valor={fim}
-            aoMudar={setFim}
-            aoLimpar={() => setFim(null)}
-          />
-          <Text style={s.dica}>
-            A data final é opcional, exceto em agendamentos recorrentes.
-          </Text>
-        </Secao>
+        {comPlano ? (
+          // Creche: so a data. O horario e definido no plano de estadia, e a
+          // data final da serie vem da duracao em semanas.
+          <Secao titulo={recorrente ? 'Início da recorrência' : 'Data'}>
+            <SeletorDataHora
+              rotulo={recorrente ? 'Primeiro dia *' : 'Dia *'}
+              valor={inicio}
+              aoMudar={setInicio}
+              apenasData
+            />
+            <Text style={s.dica}>
+              Os horários de entrada e saída são definidos no plano de estadia.
+            </Text>
+          </Secao>
+        ) : (
+          <Secao titulo="Período">
+            <SeletorDataHora
+              rotulo="Início *"
+              valor={inicio}
+              aoMudar={setInicio}
+            />
+            <SeletorDataHora
+              rotulo="Fim"
+              valor={fim}
+              aoMudar={setFim}
+              aoLimpar={() => setFim(null)}
+            />
+            <Text style={s.dica}>A data final é opcional.</Text>
+          </Secao>
+        )}
 
         {comRecorrencia ? (
           <Secao titulo="Recorrência">
             <LinhaSwitch
               titulo="Agendamento recorrente"
-              descricao="Gera uma ocorrência por dia marcado dentro do período."
+              descricao="Gera uma ocorrência por dia marcado, a partir do primeiro dia."
               valor={recorrente}
               aoMudar={setRecorrente}
             />
             {recorrente ? (
               <>
+                <Campo
+                  rotulo="Duração (semanas) *"
+                  valor={semanas}
+                  aoMudar={setSemanas}
+                  teclado="number-pad"
+                />
                 <View style={s.dias}>
                   {DIAS_SEMANA.map((d) => {
                     const ativo = dias.includes(d);
@@ -341,7 +405,8 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
                 </View>
                 {previsao > 0 ? (
                   <Text style={s.previsao}>
-                    Serão geradas {previsao} ocorrências.
+                    Serão geradas {previsao} ocorrências, até{' '}
+                    {formatarData(fimDaJanela(inicio, numeroSemanas))}.
                   </Text>
                 ) : null}
               </>

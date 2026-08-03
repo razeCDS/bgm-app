@@ -92,6 +92,33 @@ export function periodosSobrepoem(
 }
 
 /**
+ * Ultimo dia coberto por uma recorrencia de N semanas contadas a partir de
+ * `inicio` (inclusive).
+ *
+ * 1 semana = os 7 dias que comecam no proprio dia de inicio, por isso o
+ * `- 1`: comecando numa segunda com 1 semana, a janela termina no domingo
+ * seguinte, e nao na segunda da semana depois (o que geraria uma segunda
+ * ocorrencia da mesma segunda-feira).
+ */
+export function fimDaJanela(inicio: Date, semanas: number): Date {
+  const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
+  d.setDate(d.getDate() + semanas * 7 - 1);
+  return d;
+}
+
+/** Combina a data de `base` com um horario "HH:mm". Hora invalida = meia-noite. */
+export function comHorario(base: Date, hora: string | null): Date {
+  const [h, m] = (hora ?? '').split(':').map(Number);
+  return new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate(),
+    Number.isFinite(h) ? h : 0,
+    Number.isFinite(m) ? m : 0,
+  );
+}
+
+/**
  * Regras de negocio do agendamento.
  *
  * O Termo de Consentimento **nao** entra aqui de proposito: seus itens sao

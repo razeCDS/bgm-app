@@ -16,31 +16,43 @@ create extension if not exists pg_net with schema extensions;
 
 
 -- ---------------------------------------------------------------------------
--- Configuracao
+-- Configuracao — via Vault, NAO via `alter database ... set`
 --
--- A URL e a chave ficam em configuracao do banco em vez de hardcoded, para
--- o script poder ser versionado sem expor segredo.
+-- A tentacao e guardar a chave em GUC (`alter database postgres set
+-- app.service_key = '...'`). NAO faca isso: esses valores param em
+-- `pg_db_role_setting`, que `anon` e `authenticated` conseguem ler. E a
+-- `service_role` ignora todo o RLS — vazar ela e vazar o banco inteiro.
 --
--- Rode UMA VEZ, trocando os valores (o painel mostra ambos em
--- Settings > API):
+-- O Vault guarda cifrado e so `postgres`/`service_role` decifram. Como esta
+-- funcao e SECURITY DEFINER e pertence a `postgres`, ela le; o app nao.
 --
---   alter database postgres set app.supabase_url        = 'https://SEU.supabase.co';
---   alter database postgres set app.supabase_service_key = 'SUA_SERVICE_ROLE_KEY';
+-- Rode UMA VEZ no SQL Editor (o valor esta em Settings > API >
+-- `service_role`, secret):
+--
+--   select vault.create_secret('https://SEU.supabase.co', 'supabase_url');
+--   select vault.create_secret('SUA_SERVICE_ROLE_KEY',    'service_key');
+--
+-- Para trocar depois: `select vault.update_secret(<id>, '<novo valor>');`
 -- ---------------------------------------------------------------------------
 
 create or replace function public.disparar_sync_agenda()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, extensions
+set search_path = public, extensions, vault
 as $$
 declare
-  v_url  text := current_setting('app.supabase_url', true);
-  v_key  text := current_setting('app.supabase_service_key', true);
+  v_url  text;
+  v_key  text;
 begin
+  select decrypted_secret into v_url
+    from vault.decrypted_secrets where name = 'supabase_url';
+  select decrypted_secret into v_key
+    from vault.decrypted_secrets where name = 'service_key';
+
   if v_url is null or v_key is null then
     -- Sem configuracao, nao sincroniza — mas nunca impede o agendamento.
-    raise warning 'sync agenda ignorado: app.supabase_url/service_key nao configurados';
+    raise warning 'sync agenda ignorado: segredos supabase_url/service_key ausentes no Vault';
     return new;
   end if;
 

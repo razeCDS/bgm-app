@@ -260,7 +260,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const contaServico = Deno.env.get('GOOGLE_SERVICE_ACCOUNT');
-    const calendarId = Deno.env.get('GOOGLE_CALENDAR_ID');
+    // `trim`: um Enter sobrando ao colar o secret vira `%0A` na URL, e o
+    // Google responde 404 como se o calendario nao existisse. Custou uma
+    // sessao inteira de investigacao.
+    const calendarId = Deno.env.get('GOOGLE_CALENDAR_ID')?.trim();
     if (!contaServico || !calendarId) {
       throw new Error(
         'Secrets ausentes: defina GOOGLE_SERVICE_ACCOUNT e GOOGLE_CALENDAR_ID.',

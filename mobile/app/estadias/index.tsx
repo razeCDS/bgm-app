@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AbaAgenda } from '../../src/features/estadias/components/aba-agenda';
 import { AbaAgendamentos } from '../../src/features/estadias/components/aba-agendamentos';
 import { AbaCaes } from '../../src/features/estadias/components/aba-caes';
 import { cores } from '../../src/theme/cores';
 import { espaco } from '../../src/theme/estilos';
 
-type Aba = 'agendamentos' | 'caes';
+type Aba = 'agendamentos' | 'agenda' | 'caes';
 
 /** Modulo BGM Estadias: navegacao em abas. */
 export default function TelaEstadias() {
@@ -16,9 +17,15 @@ export default function TelaEstadias() {
       <View style={s.abas}>
         <Botao
           texto="Agendamentos"
-          icone="📅"
+          icone="📋"
           ativo={aba === 'agendamentos'}
           aoTocar={() => setAba('agendamentos')}
+        />
+        <Botao
+          texto="Agenda"
+          icone="📅"
+          ativo={aba === 'agenda'}
+          aoTocar={() => setAba('agenda')}
         />
         <Botao
           texto="Cães"
@@ -28,7 +35,13 @@ export default function TelaEstadias() {
         />
       </View>
 
-      {aba === 'agendamentos' ? <AbaAgendamentos /> : <AbaCaes />}
+      {aba === 'agendamentos' ? (
+        <AbaAgendamentos />
+      ) : aba === 'agenda' ? (
+        <AbaAgenda />
+      ) : (
+        <AbaCaes />
+      )}
     </View>
   );
 }

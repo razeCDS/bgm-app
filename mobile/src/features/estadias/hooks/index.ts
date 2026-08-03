@@ -5,8 +5,7 @@ import {
 } from '@tanstack/react-query';
 import { create } from 'zustand';
 
-import type { EstadiasRepositorio } from '../data/repositorio';
-import { RepositorioFake } from '../data/repositorio-fake';
+import { estadiasRepositorio } from '../../../lib/repositorios';
 import type { EntradaAgendamento } from '../types/entrada-agendamento';
 import type {
   Animal,
@@ -17,12 +16,10 @@ import type {
 import { FILTRO_VAZIO } from '../types/modelos';
 
 /**
- * Implementacao ativa do repositorio.
- *
- * Enquanto a integracao com o Supabase nao esta ligada, o app roda com dados
- * em memoria. Para ligar, troque por `new RepositorioSupabase()`.
+ * Implementacao ativa — escolhida em `src/lib/repositorios.ts` conforme
+ * as credenciais do Supabase estejam configuradas ou nao.
  */
-export const repositorio: EstadiasRepositorio = new RepositorioFake();
+const repositorio = estadiasRepositorio;
 
 // ── Chaves de cache ───────────────────────────────────────────────────────
 
@@ -87,6 +84,37 @@ export function useAgendamentos() {
   const filtro = useFiltroAgendamentos((s) => s.filtro);
   return useQuery({
     queryKey: chaves.agendamentos(filtro),
+    queryFn: () => repositorio.listarAgendamentos(filtro),
+  });
+}
+
+/**
+ * Agendamentos que tocam o mes de [referencia], para a aba Agenda.
+ *
+ * Reaproveita o filtro por intervalo que o repositorio ja expoe — nenhuma
+ * mudanca foi necessaria na camada de dados. Nao usa o filtro global da aba
+ * Agendamentos de proposito: um filtro esquecido la deixaria o calendario
+ * misteriosamente vazio.
+ */
+export function useAgendamentosDoMes(referencia: Date) {
+  const inicio = new Date(referencia.getFullYear(), referencia.getMonth(), 1);
+  const fim = new Date(
+    referencia.getFullYear(),
+    referencia.getMonth() + 1,
+    0,
+    23,
+    59,
+    59,
+  );
+
+  const filtro: FiltroAgendamentos = {
+    ...FILTRO_VAZIO,
+    dataInicio: inicio,
+    dataFim: fim,
+  };
+
+  return useQuery({
+    queryKey: ['agenda-mes', inicio.toISOString()],
     queryFn: () => repositorio.listarAgendamentos(filtro),
   });
 }

@@ -1,14 +1,14 @@
 import { create } from 'zustand';
 
-import { AuthFake, type AuthRepositorio, type Usuario } from './repositorio';
+import { authRepositorio } from '../../lib/repositorios';
+import type { Usuario } from './repositorio';
 
 /**
- * Implementacao ativa da autenticacao.
+ * Sessao do usuario.
  *
- * Para ligar o Supabase Auth, troque por `new AuthSupabase()`.
+ * A implementacao ativa (fake ou Supabase) e escolhida em
+ * `src/lib/repositorios.ts` — este store nao decide nada sobre isso.
  */
-export const authRepositorio: AuthRepositorio = new AuthFake();
-
 interface EstadoSessao {
   usuario: Usuario | null;
   /** `false` ate a sessao inicial ser resolvida — o guard espera por isso. */
@@ -16,6 +16,8 @@ interface EstadoSessao {
   carregar: () => Promise<void>;
   entrar: (email: string, senha: string) => Promise<void>;
   sair: () => Promise<void>;
+  /** Uso interno: reage a mudancas vindas do proprio Supabase. */
+  definirUsuario: (u: Usuario | null) => void;
 }
 
 export const useSessao = create<EstadoSessao>((set) => ({
@@ -36,4 +38,18 @@ export const useSessao = create<EstadoSessao>((set) => ({
     await authRepositorio.sair();
     set({ usuario: null });
   },
+
+  definirUsuario: (usuario) => set({ usuario, pronto: true }),
 }));
+
+/**
+ * O supabase-js restaura a sessao do AsyncStorage de forma assincrona e
+ * renova o token em segundo plano. Sem escutar esses eventos, ao reabrir o
+ * app haveria uma janela em que um usuario logado seria tratado como
+ * deslogado e mandado para o login.
+ *
+ * No modo em memoria a inscricao simplesmente nao existe (no-op).
+ */
+authRepositorio.aoMudarSessao?.((usuario) => {
+  useSessao.getState().definirUsuario(usuario);
+});

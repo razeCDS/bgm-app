@@ -172,8 +172,18 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     if (filtro.tutorId) q = q.eq('animais.tutor_id', filtro.tutorId);
     if (filtro.tipo) q = q.eq('tipo', filtro.tipo);
     if (filtro.status) q = q.eq('status', filtro.status);
+    // Semantica de SOBREPOSICAO com o periodo (a mesma do repositorio em
+    // memoria): um agendamento entra se ele *cruza* o intervalo, e nao
+    // apenas se comeca dentro dele. Sem isso, uma hospedagem de 28/07 a
+    // 03/08 desapareceria do calendario de agosto.
     if (filtro.dataInicio) {
-      q = q.gte('data_hora_inicio', filtro.dataInicio.toISOString());
+      const desde = filtro.dataInicio.toISOString();
+      // Termina depois do inicio do periodo — ou nao tem fim definido, e ai
+      // vale a propria data de inicio.
+      q = q.or(
+        `data_hora_fim.gte."${desde}",` +
+          `and(data_hora_fim.is.null,data_hora_inicio.gte."${desde}")`,
+      );
     }
     if (filtro.dataFim) {
       q = q.lte('data_hora_inicio', filtro.dataFim.toISOString());

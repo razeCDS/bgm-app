@@ -9,6 +9,12 @@
 -- Convencao dos dias da semana: 0 = domingo ... 6 = sabado
 -- (igual a `extract(dow from ...)` do Postgres).
 --
+-- FUSO: o banco do Supabase roda em UTC, mas os horarios do plano de estadia
+-- sao "hora de parede" da creche. Por isso tudo aqui e ancorado em
+-- `v_fuso` — nunca em `current_setting('TimeZone')`, que produziria
+-- ocorrencias 3h adiantadas e perderia o primeiro dia quando a recorrencia
+-- fosse criada a noite.
+--
 -- Rode no SQL Editor do painel do Supabase.
 -- ---------------------------------------------------------------------------
 
@@ -28,12 +34,18 @@ security invoker           -- respeita a RLS do usuario que chamou
 set search_path = public
 as $$
 declare
+  -- Fuso do negocio. Os horarios do plano de estadia sao "hora de parede"
+  -- da creche, nao instantes em UTC.
+  v_fuso constant text := 'America/Sao_Paulo';
+
   v_serie_id       uuid := gen_random_uuid();
   v_ids            uuid[] := '{}';
   v_dia            date;
   v_novo_id        uuid;
   v_hora_entrada   time;
   v_hora_saida     time;
+  v_data_inicial   date;
+  v_data_final     date;
   v_inicio         timestamptz;
   v_fim            timestamptz;
 begin
@@ -45,22 +57,26 @@ begin
     raise exception 'Periodo invalido: a data final deve ser posterior a inicial.';
   end if;
 
+  -- Limites do periodo no fuso do negocio (e nao no do servidor).
+  v_data_inicial := (p_data_inicio at time zone v_fuso)::date;
+  v_data_final   := (p_data_fim    at time zone v_fuso)::date;
+
   -- Horarios vindos do plano de estadia; se ausentes, usa o horario do inicio.
   v_hora_entrada := coalesce(
     nullif(p_plano ->> 'horario_entrada', '')::time,
-    p_data_inicio::time
+    (p_data_inicio at time zone v_fuso)::time
   );
   v_hora_saida := nullif(p_plano ->> 'horario_saida', '')::time;
 
   for v_dia in
     select d::date
-    from generate_series(p_data_inicio::date, p_data_fim::date, interval '1 day') d
+    from generate_series(v_data_inicial, v_data_final, interval '1 day') d
     where extract(dow from d)::int = any(p_dias_semana)
   loop
-    v_inicio := (v_dia + v_hora_entrada) at time zone current_setting('TimeZone');
+    v_inicio := (v_dia + v_hora_entrada) at time zone v_fuso;
     v_fim := case
                when v_hora_saida is null then null
-               else (v_dia + v_hora_saida) at time zone current_setting('TimeZone')
+               else (v_dia + v_hora_saida) at time zone v_fuso
              end;
 
     insert into agendamentos (

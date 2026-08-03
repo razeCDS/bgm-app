@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useSessao } from '../src/features/auth/store';
+import { emMemoria } from '../src/lib/repositorios';
 import { cores } from '../src/theme/cores';
 import { espaco, raio } from '../src/theme/estilos';
 
@@ -42,6 +43,14 @@ export default function TelaModulos() {
           <Text style={s.sair}>Sair</Text>
         </Pressable>
       </View>
+
+      {emMemoria ? (
+        <View style={s.aviso}>
+          <Text style={s.avisoTexto}>
+            Modo demonstração — dados de exemplo, nada é salvo de verdade.
+          </Text>
+        </View>
+      ) : null}
 
       {usuario ? <Text style={s.saudacao}>Olá, {usuario.email}</Text> : null}
 
@@ -95,6 +104,12 @@ const s = StyleSheet.create({
     paddingHorizontal: espaco.lg,
     paddingTop: espaco.lg,
   },
+  aviso: {
+    backgroundColor: cores.acentoTenue,
+    paddingHorizontal: espaco.lg,
+    paddingVertical: espaco.sm,
+  },
+  avisoTexto: { fontSize: 12, color: cores.primariaEscura, fontWeight: '600' },
   grade: {
     flexDirection: 'row',
     flexWrap: 'wrap',

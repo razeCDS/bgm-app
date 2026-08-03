@@ -75,18 +75,42 @@ EXPO_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_xxx
 ```
 
-**3. Troque as duas implementações ativas:**
+Só isso — **não há código a alterar**. O chaveamento é automático (veja abaixo).
+Reinicie com `npx expo start --clear`, porque variáveis `EXPO_PUBLIC_*` são
+embutidas no bundle em tempo de build.
+
+**3. Crie os usuários** manualmente no painel (Authentication → Users). Não há
+auto-cadastro público. Sem um usuário válido o login não passa, e a RLS
+bloqueia toda leitura — as telas ficariam vazias.
+
+## Chaveamento: memória × Supabase
+
+Existe **um único ponto de decisão**, em
+[`src/lib/repositorios.ts`](src/lib/repositorios.ts):
 
 ```ts
-// src/features/estadias/hooks/index.ts
-export const repositorio: EstadiasRepositorio = new RepositorioSupabase();
+export const modoDados = supabaseConfigurado ? 'supabase' : 'memoria';
 
-// src/features/auth/store.ts
-export const authRepositorio: AuthRepositorio = new AuthSupabase();
+export const estadiasRepositorio = supabaseConfigurado
+  ? new RepositorioSupabase()
+  : new RepositorioFake();
+
+export const authRepositorio = supabaseConfigurado
+  ? new AuthSupabase()
+  : new AuthFake();
 ```
 
-**4. Crie os usuários** manualmente no painel (Authentication → Users). Não há
-auto-cadastro público.
+`supabaseConfigurado` (em [`src/lib/supabase.ts`](src/lib/supabase.ts)) é
+simplesmente "as duas variáveis do `.env` existem". Ou seja:
+
+| `.env` | Modo | Dados |
+|---|---|---|
+| ausente | memória | exemplos, some ao fechar |
+| presente | Supabase | banco real, exige login |
+
+**Nenhum outro arquivo instancia repositório** — todos importam de
+`repositorios.ts`. Quando o app está em memória, a Home mostra uma faixa
+"Modo demonstração", para não haver dúvida sobre por que um cadastro sumiu.
 
 ## Regras de negócio
 

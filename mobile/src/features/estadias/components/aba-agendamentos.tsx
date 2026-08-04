@@ -23,6 +23,8 @@ interface Linha {
   /** > 1 quando a linha resume uma serie. */
   total: number;
   restantes: number;
+  /** Quantas ocorrencias falharam ao espelhar no Google. */
+  comFalhaSync: number;
 }
 
 /**
@@ -40,7 +42,13 @@ function agruparSeries(agendamentos: Agendamento[]): Linha[] {
   for (const a of agendamentos) {
     const serie = a.agendamentoRecorrenciaId;
     if (!serie) {
-      linhas.push({ chave: a.id, destaque: a, total: 1, restantes: 0 });
+      linhas.push({
+        chave: a.id,
+        destaque: a,
+        total: 1,
+        restantes: 0,
+        comFalhaSync: a.googleSyncErro ? 1 : 0,
+      });
       continue;
     }
     const atual = series.get(serie);
@@ -60,6 +68,8 @@ function agruparSeries(agendamentos: Agendamento[]): Linha[] {
       destaque: futuras[0] ?? ativas[ativas.length - 1] ?? ordenados[0],
       total: ordenados.length,
       restantes: futuras.length,
+      // Uma ocorrencia com falha ja basta para a serie merecer aviso.
+      comFalhaSync: ordenados.filter((a) => a.googleSyncErro).length,
     });
   }
 
@@ -153,6 +163,18 @@ function Cartao({ linha }: { linha: Linha }) {
         </Text>
       ) : null}
 
+      {linha.comFalhaSync > 0 && !cancelado ? (
+        // Falha de sync nao invalida o agendamento — ele vale no app de
+        // qualquer forma. O aviso existe porque o Google e hoje a unica
+        // visao por data, e um erro silencioso passaria despercebido.
+        <View style={s.avisoSync}>
+          <Text style={s.avisoSyncTexto}>
+            ⚠️ Não apareceu no Google Agenda
+            {linha.total > 1 ? ` (${linha.comFalhaSync} de ${linha.total})` : ''}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={s.meta}>
         <ChipTipo tipo={a.tipo} />
         <Text style={s.periodo}>
@@ -213,6 +235,17 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   serie: { fontSize: 12, color: cores.primaria, fontWeight: '500' },
+  avisoSync: {
+    backgroundColor: cores.acento,
+    borderRadius: raio.sm,
+    paddingVertical: espaco.sm - 2,
+    paddingHorizontal: espaco.sm,
+  },
+  avisoSyncTexto: {
+    fontSize: 12,
+    color: cores.primariaEscura,
+    fontWeight: '600',
+  },
   valor: { fontSize: 13, fontWeight: '600', color: cores.primariaEscura },
   fab: {
     position: 'absolute',

@@ -267,6 +267,7 @@ export const agendamentoDeLinha = (l: Linha): Agendamento => {
     agendamentoRecorrenciaId: l.agendamento_recorrencia_id ?? null,
     observacoes: l.observacoes ?? null,
     googleCalendarEventId: l.google_calendar_event_id ?? null,
+    googleSyncErro: l.google_sync_erro ?? null,
     animais,
     planoEstadia: plano ? planoDeLinha(plano) : null,
     pertencesDeixados: pertences ? pertencesDeLinha(pertences) : null,

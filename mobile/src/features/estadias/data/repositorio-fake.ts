@@ -284,6 +284,7 @@ export class RepositorioFake implements EstadiasRepositorio {
       agendamentoRecorrenciaId: serieId ?? null,
       observacoes: e.observacoes,
       googleCalendarEventId: null,
+      googleSyncErro: null,
     };
     this.agendamentos.push(novo);
     if (e.planoEstadia) {

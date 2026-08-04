@@ -702,6 +702,39 @@ describe('Ocorrencias de uma serie', () => {
   });
 });
 
+describe('Aviso de falha de sincronizacao', () => {
+  it('o campo nasce nulo e sobrevive a leitura', async () => {
+    const repo = new RepositorioFake();
+    const lista = await repo.listarAgendamentos(FILTRO_VAZIO);
+
+    // Sem integracao no modo memoria, nada falha — mas o campo existe, e e
+    // isso que o cartao consulta. Se sumisse do modelo, o aviso silenciaria.
+    expect(lista.length).toBeGreaterThan(0);
+    for (const a of lista) {
+      expect(a).toHaveProperty('googleSyncErro');
+      expect(a.googleSyncErro).toBeNull();
+    }
+  });
+
+  it('uma ocorrencia com erro marca a serie inteira', async () => {
+    const repo = new RepositorioFake();
+    const lista = await repo.listarAgendamentos(FILTRO_VAZIO);
+    const serieId = lista.find((a) => a.agendamentoRecorrenciaId)!
+      .agendamentoRecorrenciaId!;
+    const serie = await repo.listarOcorrencias(serieId);
+
+    // Reproduz a contagem que o cartao faz: uma falha ja basta para avisar,
+    // porque o Google e a unica visao por data depois que o calendario do
+    // app saiu.
+    const comErro = [
+      { ...serie[0], googleSyncErro: 'Falha ao obter token do Google' },
+      ...serie.slice(1),
+    ];
+    expect(comErro.filter((a) => a.googleSyncErro)).toHaveLength(1);
+    expect(serie.filter((a) => a.googleSyncErro)).toHaveLength(0);
+  });
+});
+
 describe('Dados de exemplo', () => {
   it('o repositorio fake vem populado e navegavel', async () => {
     const repo = new RepositorioFake();

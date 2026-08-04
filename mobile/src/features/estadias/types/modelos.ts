@@ -168,8 +168,18 @@ export interface Agendamento {
    */
   agendamentoRecorrenciaId: string | null;
   observacoes: string | null;
-  /** Reservado para a fase de integracao com o Google Agenda. */
+  /** Id do evento espelhado no Google Agenda. Nulo = ainda nao espelhado. */
   googleCalendarEventId: string | null;
+  /**
+   * Ultima falha ao espelhar no Google, ou null se a ultima tentativa deu
+   * certo. Preenchido pela Edge Function `sincronizar-agenda`.
+   *
+   * Existe porque falha de sync NUNCA invalida o agendamento — ele continua
+   * valido no banco. Sem exibir este campo, a equipe so descobriria o
+   * problema pelo cliente batendo na porta, ja que o Google e hoje a unica
+   * visao por data.
+   */
+  googleSyncErro: string | null;
   // Relacionamentos embutidos
   animais?: Animal[];
   planoEstadia?: PlanoEstadia | null;

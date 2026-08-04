@@ -24,7 +24,7 @@ export default function TelaEstadias() {
           aoTocar={() => setAba('agendamentos')}
         />
         <Botao
-          texto="Cães"
+          texto="Clientes"
           icone="🐾"
           ativo={aba === 'caes'}
           aoTocar={() => setAba('caes')}

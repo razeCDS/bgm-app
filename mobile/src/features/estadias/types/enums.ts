@@ -8,7 +8,7 @@
 export type PorteAnimal = 'mini' | 'pequeno' | 'medio' | 'grande';
 export type EspecieAnimal = 'canina' | 'felina';
 export type SexoAnimal = 'femea' | 'macho';
-export type TipoAgendamento = 'visita' | 'hotel' | 'creche';
+export type TipoAgendamento = 'visita' | 'hotel' | 'creche' | 'banho';
 export type StatusAgendamento =
   | 'solicitado'
   | 'confirmado'
@@ -21,7 +21,7 @@ export type FormaPagamento = 'pix' | 'dinheiro';
 export const PORTES: PorteAnimal[] = ['mini', 'pequeno', 'medio', 'grande'];
 export const ESPECIES: EspecieAnimal[] = ['canina', 'felina'];
 export const SEXOS: SexoAnimal[] = ['femea', 'macho'];
-export const TIPOS_AGENDAMENTO: TipoAgendamento[] = ['visita', 'hotel', 'creche'];
+export const TIPOS_AGENDAMENTO: TipoAgendamento[] = ['visita', 'hotel', 'creche', 'banho'];
 export const STATUS_AGENDAMENTO: StatusAgendamento[] = [
   'solicitado',
   'confirmado',
@@ -53,6 +53,7 @@ export const rotuloTipo: Record<TipoAgendamento, string> = {
   visita: 'Visita',
   hotel: 'Hotel',
   creche: 'Creche',
+  banho: 'Banho'
 };
 
 export const rotuloStatus: Record<StatusAgendamento, string> = {
@@ -87,10 +88,14 @@ export const rotuloFormaPagamento: Record<FormaPagamento, string> = {
 export const exigePlanoEstadia = (t: TipoAgendamento) => t === 'creche';
 
 /** Hotel e Creche sao estadias: registram valor e pertences. Visita nao. */
-export const temEstadia = (t: TipoAgendamento) => t !== 'visita';
+export const temEstadia = (t: TipoAgendamento) => t === 'hotel' || t === 'creche';
+
 
 /** Recorrencia so existe para Creche. */
 export const permiteRecorrencia = (t: TipoAgendamento) => t === 'creche';
+
+/* Banho apresentará somente período e valor. */
+export const eAgendamentoBanho = (t: TipoAgendamento) => t === 'banho';
 
 // ── Dias da semana ────────────────────────────────────────────────────────
 

@@ -33,6 +33,7 @@ const iconeTipo: Record<TipoAgendamento, string> = {
   visita: '🤝',
   hotel: '🏨',
   creche: '☀️',
+  banho: '🚿'
 };
 
 export function ChipTipo({ tipo }: { tipo: TipoAgendamento }) {

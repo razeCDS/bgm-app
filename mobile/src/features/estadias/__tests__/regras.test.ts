@@ -106,6 +106,45 @@ describe('Regras de negocio', () => {
     ).toBeNull();
   });
 
+  it('Banho aceita valor, que mora no plano', () => {
+    // A regra de "sem estadia" pergunta pelo tipo Visita, e nao por
+    // `temEstadia`: Banho tambem nao tem estadia, mas guarda valor — e valor
+    // e gravado dentro de `planos_estadia`.
+    expect(
+      validarAgendamento(
+        base({
+          tipo: 'banho',
+          planoEstadia: { ...planoVazio, valorTotal: 60 },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('Banho nao exige plano de estadia nem horarios', () => {
+    // A exigencia de entrada/saida e so da Creche.
+    expect(validarAgendamento(base({ tipo: 'banho' }))).toBeNull();
+  });
+
+  it('Banho nao aceita recorrencia', () => {
+    const erro = validarAgendamento(
+      base({
+        tipo: 'banho',
+        dataHoraFim: new Date(2026, 7, 28),
+        recorrente: true,
+        diasSemanaRecorrencia: [1],
+      }),
+    );
+    expect(erro).toContain('Creche');
+  });
+
+  it('Visita continua sem plano de estadia', () => {
+    // Guarda contra a correcao do Banho ter afrouxado a regra da Visita.
+    const erro = validarAgendamento(
+      base({ tipo: 'visita', planoEstadia: planoVazio }),
+    );
+    expect(erro).toContain('Visita');
+  });
+
   it('recorrencia so vale para Creche', () => {
     const erro = validarAgendamento(
       base({

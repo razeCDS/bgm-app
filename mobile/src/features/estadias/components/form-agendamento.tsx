@@ -42,6 +42,7 @@ import {
 import {
   abreviadoDiaSemana,
   DIAS_SEMANA,
+  eAgendamentoBanho,
   exigePlanoEstadia,
   FORMAS_PAGAMENTO,
   permiteRecorrencia,
@@ -171,6 +172,7 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   const comPlano = exigePlanoEstadia(tipo);
   const comEstadia = temEstadia(tipo);
   const comRecorrencia = permiteRecorrencia(tipo);
+  const eBanho = eAgendamentoBanho(tipo);
 
   const caesDoTutor = (animais.data ?? []).filter(
     (a) => a.tutorId === tutorId,
@@ -195,7 +197,7 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
         formaPagamento,
         valorTotal: valorOk ? valor : null,
       };
-    } else if (comEstadia && valorOk) {
+    } else if ((comEstadia || eBanho) && valorOk) {
       // Hotel: nao tem plano; o valor da estadia e guardado sozinho.
       plano = {
         tipoPlano: null,
@@ -558,7 +560,7 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
             />
           </Secao>
         ) : null}
-
+        
         {comEstadia ? (
           <>
             <Secao titulo="Valor">
@@ -648,6 +650,24 @@ export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
               />
             </Secao>
           </>
+        ) : null}
+
+        {/*
+          Banho tem secao propria em vez de entrar no bloco `comEstadia`:
+          registra valor, mas nao pertences. Forma de pagamento ficou de fora
+          — se um dia fizer sentido, e trocar a condicao dela por `eBanho`,
+          nao `comPlano` (que so vale para Creche).
+        */}
+        {eBanho ? (
+          <Secao titulo="Valor">
+            <Campo
+              rotulo="Valor do(s) banho(s)"
+              valor={valorTotal}
+              aoMudar={setValorTotal}
+              teclado="decimal-pad"
+              prefixo="R$"
+            />
+          </Secao>
         ) : null}
 
         <Secao titulo="Observações">

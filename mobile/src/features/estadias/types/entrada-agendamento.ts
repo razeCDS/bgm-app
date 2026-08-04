@@ -154,7 +154,11 @@ export function validarAgendamento(e: EntradaAgendamento): string | null {
   }
 
   // Visita nao registra estadia.
-  if (!temEstadia(e.tipo)) {
+  //
+  // Pergunta pelo tipo, e nao por `temEstadia`: Banho tambem nao tem estadia
+  // (nao registra pertences), mas guarda valor — e valor mora no plano. Usar
+  // o helper aqui rejeitaria todo Banho com valor preenchido.
+  if (e.tipo === 'visita') {
     if (e.planoEstadia) {
       return 'Agendamento do tipo Visita nao possui plano de estadia.';
     }

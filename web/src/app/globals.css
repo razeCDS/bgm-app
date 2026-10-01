@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/*
+ * Paleta oficial do BGM Daycare — substitui o `theme/cores.ts` do mobile.
+ *
+ * Cada `--color-x` vira classe (`bg-x`, `text-x`, `border-x`...). Estes sao
+ * os unicos literais de cor do app: nenhuma tela declara `#rrggbb` inline.
+ *
+ * As variacoes "Tenue" do mobile (rgba) nao existem aqui: o Tailwind aplica
+ * opacidade direto na classe — `bg-primaria/12` e a antiga `primariaTenue`.
+ * O `branco` tambem saiu: o Tailwind ja tem `white`.
+ */
+@theme {
+  /* Verde escuro — cor primaria (cabecalho, botoes, destaques). */
+  --color-primaria: #46715c;
+  --color-primaria-escura: #35543f;
+  --color-primaria-clara: #6b9280;
+  /* Rosa terracota — acento (badges, icones, chips). */
+  --color-acento: #dca899;
+  /* Verde-acinzentado — bordas e superficies secundarias. */
+  --color-neutra: #adb4ab;
+  --color-neutra-clara: #edefec;
+  --color-texto-escuro: #1f2b24;
+  --color-texto-suave: #5f6b63;
+  --color-erro: #b3261e;
+
+  /* Raio de campos e botoes (10px). Os demais usam a escala padrao:
+     8px = rounded-lg, 12px = rounded-xl, pilula = rounded-full. */
+  --radius-campo: 10px;
+}
+
+@layer base {
+  body {
+    @apply bg-white text-texto-escuro antialiased;
+    /* Toque em botao/link no celular nao pisca um retangulo azul. */
+    -webkit-tap-highlight-color: transparent;
+  }
+}

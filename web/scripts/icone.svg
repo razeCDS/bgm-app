@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fundo ate a borda: o Android recorta o icone "maskable" em circulo,
+       gota ou quadrado, e qualquer sobra apareceria como borda branca. -->
+  <rect width="512" height="512" fill="#46715c"/>
+  <!-- A pata fica dentro do circulo central de 80% (zona segura do
+       maskable), para nenhum recorte cortar os dedos. -->
+  <g fill="#dca899">
+    <ellipse cx="256" cy="320" rx="92" ry="76"/>
+    <ellipse cx="150" cy="232" rx="32" ry="42" transform="rotate(-26 150 232)"/>
+    <ellipse cx="212" cy="166" rx="33" ry="45" transform="rotate(-10 212 166)"/>
+    <ellipse cx="300" cy="166" rx="33" ry="45" transform="rotate(10 300 166)"/>
+    <ellipse cx="362" cy="232" rx="32" ry="42" transform="rotate(26 362 232)"/>
+  </g>
+</svg>

@@ -1,8 +1,10 @@
 # BGM Daycare — web (PWA)
 
 App interno do BGM Daycare em Next.js 16, instalável no celular como PWA.
-Substitui o app Expo de `../mobile` — a camada de regras, repositórios e hooks
-veio de lá sem reescrita; só as telas foram refeitas.
+Substituiu o antigo app Expo (`mobile/`, removido do repositório — está no
+histórico do git). A camada de regras, repositórios e hooks veio de lá sem
+reescrita; só as telas foram refeitas. Os comentários que citam "o mobile"
+explicam de onde veio cada decisão.
 
 ## Rodar
 

@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * O chaveamento e resolvido na carga do modulo a partir das variaveis
- * EXPO_PUBLIC_SUPABASE_*. No ambiente de teste elas nao existem, entao o
+ * NEXT_PUBLIC_SUPABASE_*. No ambiente de teste elas nao existem, entao o
  * esperado e cair no modo em memoria.
  */
 describe('Chaveamento de repositorio', () => {

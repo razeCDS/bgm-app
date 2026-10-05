@@ -2,17 +2,35 @@ import { describe, expect, it } from 'vitest';
 import { RepositorioFake } from '../data/repositorio-fake';
 import {
   comHorario,
+  diasDaEstadia,
+  erroMudancaServicos,
   fimDaJanela,
   gerarOcorrencias,
   validarAgendamento,
   type EntradaAgendamento,
 } from '../types/entrada-agendamento';
-import { diaSemanaDe, type DiaSemana } from '../types/enums';
-import { FILTRO_VAZIO } from '../types/modelos';
+import {
+  diaSemanaDe,
+  erroCombinacao,
+  servicoIncompativel,
+  type DiaSemana,
+  type ServicoAgendamento,
+} from '../types/enums';
+import {
+  FILTRO_VAZIO,
+  ordenarServicos,
+  servicosDe,
+  valorEPorDia,
+  valorTotalDe,
+} from '../types/modelos';
+
+/** Servicos sem valor informado. */
+const so = (...lista: ServicoAgendamento[]) =>
+  lista.map((servico) => ({ servico, valor: null, data: null }));
 
 const base = (over: Partial<EntradaAgendamento> = {}): EntradaAgendamento => ({
   animalIds: ['x'],
-  tipo: 'visita',
+  servicos: so('visita'),
   dataHoraInicio: new Date(2026, 7, 10),
   dataHoraFim: null,
   status: 'solicitado',
@@ -30,7 +48,6 @@ const planoVazio = {
   horarioEntrada: null,
   horarioSaida: null,
   formaPagamento: null,
-  valorTotal: null,
 };
 
 /**
@@ -43,10 +60,32 @@ const planoCreche = {
   horarioSaida: '18:00',
 };
 
+const pertences = {
+  temCaminha: true,
+  corCaminha: null,
+  temRoupa: false,
+  corRoupa: null,
+  temBrinquedo: false,
+  qualBrinquedo: null,
+  racao: null,
+  quantidade: null,
+  vezes: null,
+  observacoes: null,
+};
+
 describe('Regras de negocio', () => {
-  it('Visita nao aceita plano de estadia', () => {
+  it('Visita nao aceita plano de estadia nem pertences', () => {
+    expect(
+      validarAgendamento(base({ servicos: so('visita'), planoEstadia: planoCreche })),
+    ).toContain('Creche');
+    expect(
+      validarAgendamento(base({ servicos: so('visita'), pertencesDeixados: pertences })),
+    ).toContain('Creche ou Hotel');
+  });
+
+  it('Visita nao aceita valor', () => {
     const erro = validarAgendamento(
-      base({ tipo: 'visita', planoEstadia: planoVazio }),
+      base({ servicos: [{ servico: 'visita', valor: 50, data: null }] }),
     );
     expect(erro).toContain('Visita');
   });
@@ -54,22 +93,31 @@ describe('Regras de negocio', () => {
   it('Hotel nao exige plano de estadia', () => {
     // O Hotel usa o proprio periodo como entrada/saida; o plano (rotina
     // diaria) nao se aplica.
-    expect(validarAgendamento(base({ tipo: 'hotel' }))).toBeNull();
+    expect(validarAgendamento(base({ servicos: so('hotel') }))).toBeNull();
   });
 
-  it('Hotel aceita apenas o valor da estadia', () => {
+  it('Hotel nao aceita plano de estadia', () => {
+    // Antes o plano guardava o valor do Hotel; agora o valor mora no
+    // servico, e o plano e exclusivo da Creche.
+    const erro = validarAgendamento(
+      base({ servicos: so('hotel'), planoEstadia: planoCreche }),
+    );
+    expect(erro).toContain('Creche');
+  });
+
+  it('Hotel aceita valor e pertences', () => {
     const erro = validarAgendamento(
       base({
-        tipo: 'hotel',
+        servicos: [{ servico: 'hotel', valor: 480, data: null }],
         dataHoraFim: new Date(2026, 7, 14),
-        planoEstadia: { ...planoVazio, valorTotal: 480 },
+        pertencesDeixados: pertences,
       }),
     );
     expect(erro).toBeNull();
   });
 
   it('Creche exige plano de estadia', () => {
-    const erro = validarAgendamento(base({ tipo: 'creche' }));
+    const erro = validarAgendamento(base({ servicos: so('creche') }));
     expect(erro).toContain('obrigatorio');
   });
 
@@ -77,59 +125,63 @@ describe('Regras de negocio', () => {
     // Sem a secao de Periodo, estes horarios sao a unica fonte da hora de
     // cada ocorrencia — nulos, tudo cairia a meia-noite silenciosamente.
     const semNada = validarAgendamento(
-      base({ tipo: 'creche', planoEstadia: planoVazio }),
+      base({ servicos: so('creche'), planoEstadia: planoVazio }),
     );
     expect(semNada).toContain('entrada');
 
     const semSaida = validarAgendamento(
       base({
-        tipo: 'creche',
+        servicos: so('creche'),
         planoEstadia: { ...planoVazio, horarioEntrada: '08:00' },
       }),
     );
     expect(semSaida).toContain('saida');
 
     expect(
-      validarAgendamento(base({ tipo: 'creche', planoEstadia: planoCreche })),
+      validarAgendamento(base({ servicos: so('creche'), planoEstadia: planoCreche })),
     ).toBeNull();
   });
 
-  it('Hotel continua sem exigir horarios do plano', () => {
-    // A exigencia vale so para Creche: o Hotel informa o periodo direto.
+  it('Creche com extras continua exigindo o plano', () => {
+    // O plano vem da Creche, nao importa o que esteja junto.
+    const erro = validarAgendamento(base({ servicos: so('creche', 'banho') }));
+    expect(erro).toContain('obrigatorio');
+  });
+
+  it('extras sozinhos nao exigem plano nem horarios', () => {
+    for (const extra of ['banho', 'tosa_higienica', 'consulta'] as const) {
+      expect(validarAgendamento(base({ servicos: so(extra) }))).toBeNull();
+    }
     expect(
       validarAgendamento(
         base({
-          tipo: 'hotel',
-          dataHoraFim: new Date(2026, 7, 14),
-          planoEstadia: { ...planoVazio, valorTotal: 480 },
+          servicos: [
+            { servico: 'banho', valor: 60, data: null },
+            { servico: 'tosa_higienica', valor: 40, data: null },
+          ],
         }),
       ),
     ).toBeNull();
   });
 
-  it('Banho aceita valor, que mora no plano', () => {
-    // A regra de "sem estadia" pergunta pelo tipo Visita, e nao por
-    // `temEstadia`: Banho tambem nao tem estadia, mas guarda valor — e valor
-    // e gravado dentro de `planos_estadia`.
-    expect(
-      validarAgendamento(
-        base({
-          tipo: 'banho',
-          planoEstadia: { ...planoVazio, valorTotal: 60 },
-        }),
-      ),
-    ).toBeNull();
+  it('extras sozinhos nao aceitam pertences', () => {
+    const erro = validarAgendamento(
+      base({ servicos: so('banho'), pertencesDeixados: pertences }),
+    );
+    expect(erro).toContain('Creche ou Hotel');
   });
 
-  it('Banho nao exige plano de estadia nem horarios', () => {
-    // A exigencia de entrada/saida e so da Creche.
-    expect(validarAgendamento(base({ tipo: 'banho' }))).toBeNull();
+  it('valor negativo e rejeitado', () => {
+    const erro = validarAgendamento(
+      base({ servicos: [{ servico: 'banho', valor: -1, data: null }] }),
+    );
+    expect(erro).toContain('negativo');
   });
 
   it('Banho nao aceita recorrencia', () => {
     const erro = validarAgendamento(
       base({
-        tipo: 'banho',
+        servicos: so('banho'),
         dataHoraFim: new Date(2026, 7, 28),
         recorrente: true,
         diasSemanaRecorrencia: [1],
@@ -138,25 +190,29 @@ describe('Regras de negocio', () => {
     expect(erro).toContain('Creche');
   });
 
-  it('Visita continua sem plano de estadia', () => {
-    // Guarda contra a correcao do Banho ter afrouxado a regra da Visita.
-    const erro = validarAgendamento(
-      base({ tipo: 'visita', planoEstadia: planoVazio }),
-    );
-    expect(erro).toContain('Visita');
-  });
-
-  it('recorrencia so vale para Creche', () => {
+  it('recorrencia so vale com Creche', () => {
     const erro = validarAgendamento(
       base({
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraFim: new Date(2026, 7, 28),
         recorrente: true,
         diasSemanaRecorrencia: [1],
-        planoEstadia: planoVazio,
       }),
     );
     expect(erro).toContain('Creche');
+  });
+
+  it('Creche com Banho aceita recorrencia', () => {
+    const erro = validarAgendamento(
+      base({
+        servicos: so('creche', 'banho'),
+        dataHoraFim: new Date(2026, 7, 28),
+        recorrente: true,
+        diasSemanaRecorrencia: [1],
+        planoEstadia: planoCreche,
+      }),
+    );
+    expect(erro).toBeNull();
   });
 
   it('data final anterior a inicial e rejeitada', () => {
@@ -164,6 +220,250 @@ describe('Regras de negocio', () => {
       base({ dataHoraInicio: new Date(2026, 7, 10), dataHoraFim: new Date(2026, 7, 9) }),
     );
     expect(erro).not.toBeNull();
+  });
+});
+
+describe('Combinacao de servicos', () => {
+  it('exige ao menos um servico', () => {
+    expect(erroCombinacao([])).not.toBeNull();
+    expect(validarAgendamento(base({ servicos: [] }))).toContain('serviço');
+  });
+
+  it('Creche e Hotel se excluem', () => {
+    expect(erroCombinacao(['creche', 'hotel'])).toContain('Creche e Hotel');
+  });
+
+  it('Visita fica sozinha', () => {
+    expect(erroCombinacao(['visita'])).toBeNull();
+    expect(erroCombinacao(['banho', 'visita'])).toContain('Visita');
+    expect(erroCombinacao(['hotel', 'visita'])).toContain('Visita');
+  });
+
+  it('extras combinam com Creche, com Hotel ou entre si', () => {
+    expect(erroCombinacao(['creche', 'banho', 'tosa_higienica', 'consulta'])).toBeNull();
+    expect(erroCombinacao(['hotel', 'banho'])).toBeNull();
+    expect(erroCombinacao(['banho', 'consulta'])).toBeNull();
+  });
+
+  it('servico repetido sem dia e rejeitado', () => {
+    // A combinacao olha servicos distintos; a repeticao e checada pelo par
+    // servico + dia.
+    expect(erroCombinacao(['banho', 'banho'])).toBeNull();
+    expect(validarAgendamento(base({ servicos: so('banho', 'banho') }))).toContain(
+      'repetido',
+    );
+  });
+
+  it('o formulario desabilita so o que formaria combinacao invalida', () => {
+    // Com Creche marcada: Hotel e Visita apagam; extras seguem livres.
+    expect(servicoIncompativel('hotel', ['creche'])).toBe(true);
+    expect(servicoIncompativel('visita', ['creche'])).toBe(true);
+    expect(servicoIncompativel('banho', ['creche'])).toBe(false);
+    // Um servico ja marcado nunca fica desabilitado: precisa poder desmarcar.
+    expect(servicoIncompativel('creche', ['creche'])).toBe(false);
+    // Nada marcado: tudo livre.
+    expect(servicoIncompativel('visita', [])).toBe(false);
+  });
+});
+
+describe('Extras num dia da hospedagem', () => {
+  // Hotel de 18/08 09h a 22/08 18h.
+  const hotel = (extras: { servico: ServicoAgendamento; data: Date | null }[]) =>
+    base({
+      servicos: [
+        { servico: 'hotel', valor: 480, data: null },
+        ...extras.map((x) => ({ ...x, valor: null })),
+      ],
+      dataHoraInicio: new Date(2026, 7, 18, 9),
+      dataHoraFim: new Date(2026, 7, 22, 18),
+    });
+
+  it('os dias da estadia vao da entrada a saida, inclusive', () => {
+    const dias = diasDaEstadia(new Date(2026, 7, 18, 9), new Date(2026, 7, 22, 18));
+    expect(dias.map((d) => d.getDate())).toEqual([18, 19, 20, 21, 22]);
+    // Meia-noite local: e o que se compara com a data do extra.
+    expect(dias[0].getHours()).toBe(0);
+    // Sem data final, so o dia de entrada (a mesma regra do banco).
+    expect(diasDaEstadia(new Date(2026, 7, 18, 9), null)).toHaveLength(1);
+  });
+
+  it('aceita extra num dia dentro da estadia, inclusive entrada e saida', () => {
+    expect(
+      validarAgendamento(
+        hotel([
+          { servico: 'banho', data: new Date(2026, 7, 18) },
+          { servico: 'banho', data: new Date(2026, 7, 22) },
+          { servico: 'tosa_higienica', data: new Date(2026, 7, 20) },
+        ]),
+      ),
+    ).toBeNull();
+  });
+
+  it('o mesmo extra pode vir sem dia e em dias diferentes', () => {
+    expect(
+      validarAgendamento(
+        hotel([
+          { servico: 'banho', data: null },
+          { servico: 'banho', data: new Date(2026, 7, 19) },
+          { servico: 'banho', data: new Date(2026, 7, 21) },
+        ]),
+      ),
+    ).toBeNull();
+  });
+
+  it('recusa o mesmo extra duas vezes no mesmo dia', () => {
+    const erro = validarAgendamento(
+      hotel([
+        { servico: 'banho', data: new Date(2026, 7, 20) },
+        { servico: 'banho', data: new Date(2026, 7, 20) },
+      ]),
+    );
+    expect(erro).toContain('repetido no dia 20/08/2026');
+  });
+
+  it('recusa dia fora da estadia', () => {
+    const erro = validarAgendamento(
+      hotel([{ servico: 'banho', data: new Date(2026, 7, 23) }]),
+    );
+    expect(erro).toContain('fora do período');
+  });
+
+  it('dia especifico so existe para extras de Hotel', () => {
+    // O proprio Hotel nao tem dia: ele e a estadia.
+    expect(
+      validarAgendamento(
+        base({
+          servicos: [{ servico: 'hotel', valor: null, data: new Date(2026, 7, 18) }],
+          dataHoraInicio: new Date(2026, 7, 18, 9),
+          dataHoraFim: new Date(2026, 7, 22, 18),
+        }),
+      ),
+    ).toContain('Hotel');
+    // Na Creche cada dia ja e uma ocorrencia: o extra vai sem dia.
+    expect(
+      validarAgendamento(
+        base({
+          servicos: [
+            { servico: 'creche', valor: null, data: null },
+            { servico: 'banho', valor: null, data: new Date(2026, 7, 10) },
+          ],
+          planoEstadia: planoCreche,
+        }),
+      ),
+    ).toContain('Hotel');
+    // Banho sozinho tambem nao.
+    expect(
+      validarAgendamento(
+        base({ servicos: [{ servico: 'banho', valor: null, data: new Date(2026, 7, 10) }] }),
+      ),
+    ).toContain('Hotel');
+  });
+
+  it('o banho em dois dias conta como um servico so nos chips e nas regras', () => {
+    const servicos = [
+      { servico: 'hotel' as const, valor: 480, data: null },
+      { servico: 'banho' as const, valor: 70, data: new Date(2026, 7, 19) },
+      { servico: 'banho' as const, valor: 70, data: new Date(2026, 7, 21) },
+    ];
+    expect(servicosDe(servicos)).toEqual(['hotel', 'banho']);
+    expect(valorTotalDe(servicos)).toBe(620);
+  });
+
+  it('ordena por servico e, dentro dele, sem dia primeiro', () => {
+    const ordenados = ordenarServicos([
+      { servico: 'banho' as const, data: new Date(2026, 7, 21) },
+      { servico: 'hotel' as const, data: null },
+      { servico: 'banho' as const, data: null },
+      { servico: 'banho' as const, data: new Date(2026, 7, 19) },
+    ]);
+    expect(ordenados.map((s) => `${s.servico} ${s.data?.getDate() ?? '-'}`)).toEqual([
+      'hotel -',
+      'banho -',
+      'banho 19',
+      'banho 21',
+    ]);
+  });
+});
+
+describe('Edicao de servicos', () => {
+  it('extras entram e saem livremente', () => {
+    expect(erroMudancaServicos(['creche'], ['creche', 'banho'])).toBeNull();
+    expect(erroMudancaServicos(['hotel', 'banho'], ['hotel'])).toBeNull();
+    expect(erroMudancaServicos(['banho'], ['tosa_higienica'])).toBeNull();
+  });
+
+  it('principais nao podem ser trocados, incluidos ou removidos', () => {
+    expect(erroMudancaServicos(['creche'], ['hotel'])).not.toBeNull();
+    expect(erroMudancaServicos(['banho'], ['creche', 'banho'])).not.toBeNull();
+    expect(erroMudancaServicos(['hotel', 'banho'], ['banho'])).not.toBeNull();
+    expect(erroMudancaServicos(['visita'], ['banho'])).not.toBeNull();
+  });
+
+  it('o repositorio recusa a troca do principal', async () => {
+    const repo = new RepositorioFake(false);
+    const tutor = await repo.salvarTutor({
+      id: '',
+      nomeCompleto: 'Tutor',
+      endereco: null,
+      rg: null,
+      cpfCnpj: '123',
+      telefone: null,
+      email: null,
+    });
+    const animal = await repo.salvarAnimal({
+      id: '',
+      tutorId: tutor.id,
+      nome: 'Rex',
+      raca: null,
+      idade: null,
+      porte: null,
+      peso: null,
+      especie: null,
+      sexo: null,
+      castrado: null,
+      docil: null,
+      observacoes: null,
+    });
+    const dados = {
+      animalIds: [animal.id],
+      dataHoraInicio: new Date(2026, 8, 10, 9),
+      dataHoraFim: new Date(2026, 8, 14, 18),
+      status: 'confirmado' as const,
+    };
+    const [criado] = await repo.criarAgendamento(base({ ...dados, servicos: so('hotel') }));
+
+    // Incluir um banho: ok.
+    const comBanho = await repo.atualizarAgendamento(
+      criado.id,
+      base({ ...dados, servicos: [...so('hotel'), { servico: 'banho', valor: 70, data: null }] }),
+    );
+    expect(comBanho.servicos.map((s) => s.servico)).toEqual(['hotel', 'banho']);
+
+    // Trocar Hotel por Banho: recusado.
+    await expect(
+      repo.atualizarAgendamento(criado.id, base({ ...dados, servicos: so('banho') })),
+    ).rejects.toThrow(/Cancele/);
+  });
+});
+
+describe('Valores por servico', () => {
+  it('soma so os valores informados', () => {
+    expect(
+      valorTotalDe([
+        { servico: 'creche', valor: 80, data: null },
+        { servico: 'banho', valor: 50, data: null },
+        { servico: 'consulta', valor: null, data: null },
+      ]),
+    ).toBe(130);
+  });
+
+  it('sem nenhum valor informado, o total e nulo (e nao zero)', () => {
+    expect(valorTotalDe(so('banho', 'tosa_higienica'))).toBeNull();
+  });
+
+  it('com Creche o valor e por dia', () => {
+    expect(valorEPorDia(so('creche', 'banho'))).toBe(true);
+    expect(valorEPorDia(so('hotel', 'banho'))).toBe(false);
   });
 });
 
@@ -177,7 +477,7 @@ describe('Recorrencia', () => {
 
   it('gera uma ocorrencia por dia marcado no periodo', () => {
     const entrada = base({
-      tipo: 'creche',
+      servicos: so('creche'),
       dataHoraInicio: new Date(2026, 7, 3, 8),
       dataHoraFim: new Date(2026, 7, 28, 18),
       status: 'confirmado',
@@ -224,7 +524,7 @@ describe('Recorrencia', () => {
     const criados = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: new Date(2026, 7, 3, 8),
         dataHoraFim: new Date(2026, 7, 14, 18),
         status: 'confirmado',
@@ -262,7 +562,7 @@ describe('Janela da recorrencia por semanas', () => {
     for (const semanas of [1, 4, 12]) {
       const ocorrencias = gerarOcorrencias({
         ...base({
-          tipo: 'creche',
+          servicos: so('creche'),
           dataHoraInicio: comHorario(inicio, '08:00'),
           dataHoraFim: comHorario(fimDaJanela(inicio, semanas), '18:00'),
           recorrente: true,
@@ -278,7 +578,7 @@ describe('Janela da recorrencia por semanas', () => {
     const inicio = new Date(2026, 7, 3);
     const ocorrencias = gerarOcorrencias(
       base({
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '08:00'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 4), '18:00'),
         recorrente: true,
@@ -293,7 +593,7 @@ describe('Janela da recorrencia por semanas', () => {
     const inicio = new Date(2026, 7, 3, 23, 45); // hora irrelevante
     const [primeira] = gerarOcorrencias(
       base({
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '07:30'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 1), '17:15'),
         recorrente: true,
@@ -348,7 +648,7 @@ describe('Dupla reserva do mesmo animal', () => {
     await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -359,7 +659,7 @@ describe('Dupla reserva do mesmo animal', () => {
       repo.criarAgendamento(
         base({
           animalIds: [animal.id],
-          tipo: 'creche',
+          servicos: so('creche'),
           dataHoraInicio: new Date(2026, 8, 12, 8),
           dataHoraFim: new Date(2026, 8, 12, 18),
           status: 'solicitado',
@@ -375,7 +675,7 @@ describe('Dupla reserva do mesmo animal', () => {
     const [criado] = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -386,7 +686,7 @@ describe('Dupla reserva do mesmo animal', () => {
     const novos = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: new Date(2026, 8, 12, 8),
         dataHoraFim: new Date(2026, 8, 12, 18),
         status: 'solicitado',
@@ -402,7 +702,7 @@ describe('Dupla reserva do mesmo animal', () => {
     const [criado] = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -412,7 +712,7 @@ describe('Dupla reserva do mesmo animal', () => {
     const atualizado = await repo.atualizarAgendamento(criado.id, {
       ...base({
         animalIds: [animal.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 11, 9),
         dataHoraFim: new Date(2026, 8, 15, 18),
         status: 'confirmado',
@@ -428,7 +728,7 @@ describe('Dupla reserva do mesmo animal', () => {
     await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 7, 12, 9),
         dataHoraFim: new Date(2026, 7, 12, 18),
         status: 'confirmado',
@@ -440,7 +740,7 @@ describe('Dupla reserva do mesmo animal', () => {
       repo.criarAgendamento(
         base({
           animalIds: [animal.id],
-          tipo: 'creche',
+          servicos: so('creche'),
           dataHoraInicio: new Date(2026, 7, 3, 9),
           dataHoraFim: new Date(2026, 7, 28, 18),
           status: 'confirmado',
@@ -493,7 +793,7 @@ describe('Varios caes no mesmo agendamento', () => {
     const [criado] = await repo.criarAgendamento(
       base({
         animalIds: [rex.id, toby.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -512,7 +812,7 @@ describe('Varios caes no mesmo agendamento', () => {
     await repo.criarAgendamento(
       base({
         animalIds: [rex.id, toby.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -524,7 +824,7 @@ describe('Varios caes no mesmo agendamento', () => {
       repo.criarAgendamento(
         base({
           animalIds: [toby.id],
-          tipo: 'creche',
+          servicos: so('creche'),
           dataHoraInicio: new Date(2026, 8, 12, 8),
           dataHoraFim: new Date(2026, 8, 12, 18),
           status: 'solicitado',
@@ -540,7 +840,7 @@ describe('Varios caes no mesmo agendamento', () => {
     await repo.criarAgendamento(
       base({
         animalIds: [rex.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -550,7 +850,7 @@ describe('Varios caes no mesmo agendamento', () => {
     const novos = await repo.criarAgendamento(
       base({
         animalIds: [toby.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -565,7 +865,7 @@ describe('Varios caes no mesmo agendamento', () => {
     await repo.criarAgendamento(
       base({
         animalIds: [rex.id, toby.id],
-        tipo: 'hotel',
+        servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
         status: 'confirmado',
@@ -623,7 +923,7 @@ describe('Ocorrencias de uma serie', () => {
     const criados = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '08:00'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 4), '18:00'),
         status: 'confirmado',
@@ -682,7 +982,7 @@ describe('Ocorrencias de uma serie', () => {
     const criados = await repo.criarAgendamento(
       base({
         animalIds: [animal.id],
-        tipo: 'creche',
+        servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '08:00'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 5), '18:00'),
         status: 'confirmado',
@@ -784,8 +1084,9 @@ describe('Dados de exemplo', () => {
 
     expect(tutores).toHaveLength(3);
     expect(animais).toHaveLength(4);
-    // Visita + Hotel + Creche avulsa + 12 ocorrencias da serie recorrente.
-    expect(agendamentos).toHaveLength(15);
+    // Visita + Hotel + Creche avulsa + 12 ocorrencias da serie recorrente
+    // + Banho com Tosa.
+    expect(agendamentos).toHaveLength(16);
     expect(animais.every((a) => a.tutor)).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import {
   ERRO_SOBREPOSICAO,
+  erroMudancaServicos,
   ErroValidacao,
   garantirValido,
   geraRecorrencia,
@@ -8,18 +9,20 @@ import {
   periodosSobrepoem,
   type EntradaAgendamento,
 } from '../types/entrada-agendamento';
-import type {
-  Agendamento,
-  Anamnese,
-  Animal,
-  ContatoEmergencia,
-  FichaAnimal,
-  FiltroAgendamentos,
-  PertencesDeixados,
-  PlanoEstadia,
-  TermoConsentimento,
-  Tutor,
-  VeterinarioInfo,
+import {
+  ordenarServicos,
+  servicosDe,
+  type Agendamento,
+  type Anamnese,
+  type Animal,
+  type ContatoEmergencia,
+  type FichaAnimal,
+  type FiltroAgendamentos,
+  type PertencesDeixados,
+  type PlanoEstadia,
+  type TermoConsentimento,
+  type Tutor,
+  type VeterinarioInfo,
 } from '../types/modelos';
 import type { EstadiasRepositorio } from './repositorio';
 
@@ -181,7 +184,12 @@ export class RepositorioFake implements EstadiasRepositorio {
         ) {
           return false;
         }
-        if (filtro.tipo && a.tipo !== filtro.tipo) return false;
+        if (
+          filtro.servico &&
+          !a.servicos.some((s) => s.servico === filtro.servico)
+        ) {
+          return false;
+        }
         if (filtro.status && a.status !== filtro.status) return false;
         // Intervalo: sobreposicao com o periodo informado.
         if (filtro.dataInicio) {
@@ -274,7 +282,8 @@ export class RepositorioFake implements EstadiasRepositorio {
     const novo: Agendamento = {
       id,
       animalIds: [...e.animalIds],
-      tipo: e.tipo,
+      // Copia: numa serie, cada ocorrencia tem a sua lista (como no banco).
+      servicos: ordenarServicos(e.servicos.map((s) => ({ ...s }))),
       dataHoraInicio: inicio,
       dataHoraFim: fim,
       status: e.status,
@@ -310,6 +319,12 @@ export class RepositorioFake implements EstadiasRepositorio {
     const i = this.agendamentos.findIndex((a) => a.id === id);
     if (i < 0) throw new ErroValidacao('Agendamento nao encontrado.');
 
+    const erroServicos = erroMudancaServicos(
+      servicosDe(this.agendamentos[i].servicos),
+      servicosDe(entrada.servicos),
+    );
+    if (erroServicos) throw new ErroValidacao(erroServicos);
+
     // Ignora o proprio registro: mover um agendamento nao pode colidir
     // consigo mesmo.
     if (
@@ -327,7 +342,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     this.agendamentos[i] = {
       ...this.agendamentos[i],
       animalIds: [...entrada.animalIds],
-      tipo: entrada.tipo,
+      servicos: ordenarServicos(entrada.servicos.map((s) => ({ ...s }))),
       dataHoraInicio: entrada.dataHoraInicio,
       dataHoraFim: entrada.dataHoraFim,
       status: entrada.status,
@@ -558,7 +573,7 @@ export class RepositorioFake implements EstadiasRepositorio {
     this.inserirUm(
       {
         animalIds: [luna.id],
-        tipo: 'visita',
+        servicos: [{ servico: 'visita', valor: null, data: null }],
         dataHoraInicio: new Date(2026, 7, 10, 14),
         dataHoraFim: new Date(2026, 7, 10, 15),
         status: 'solicitado',
@@ -572,25 +587,22 @@ export class RepositorioFake implements EstadiasRepositorio {
       new Date(2026, 7, 10, 15),
     );
 
-    // Hotel — sem plano de rotina; apenas valor e pertences.
+    // Hotel com banho na saida — sem plano de rotina; valores e pertences.
     this.inserirUm(
       {
         animalIds: [thor.id],
-        tipo: 'hotel',
+        servicos: [
+          { servico: 'hotel', valor: 480, data: null },
+          // Banho num dia especifico da estadia: o ultimo, antes da saida.
+          { servico: 'banho', valor: 70, data: new Date(2026, 7, 22) },
+        ],
         dataHoraInicio: new Date(2026, 7, 18, 9),
         dataHoraFim: new Date(2026, 7, 22, 18),
         status: 'confirmado',
         recorrente: false,
         diasSemanaRecorrencia: [],
-        observacoes: 'Hospedagem durante viagem do tutor.',
-        planoEstadia: {
-          tipoPlano: null,
-          totalDias: null,
-          horarioEntrada: null,
-          horarioSaida: null,
-          formaPagamento: null,
-          valorTotal: 480,
-        },
+        observacoes: 'Hospedagem durante viagem do tutor. Banho no último dia.',
+        planoEstadia: null,
         pertencesDeixados: {
           temCaminha: true,
           corCaminha: 'Cinza',
@@ -608,11 +620,14 @@ export class RepositorioFake implements EstadiasRepositorio {
       new Date(2026, 7, 22, 18),
     );
 
-    // Creche avulsa.
+    // Creche avulsa com tosa.
     this.inserirUm(
       {
         animalIds: [mel.id],
-        tipo: 'creche',
+        servicos: [
+          { servico: 'creche', valor: 80, data: null },
+          { servico: 'tosa_higienica', valor: 40, data: null },
+        ],
         dataHoraInicio: new Date(2026, 7, 5, 8),
         dataHoraFim: new Date(2026, 7, 5, 17),
         status: 'em_andamento',
@@ -625,7 +640,6 @@ export class RepositorioFake implements EstadiasRepositorio {
           horarioEntrada: '08:00',
           horarioSaida: '17:00',
           formaPagamento: 'pix',
-          valorTotal: 80,
         },
         pertencesDeixados: null,
       },
@@ -633,10 +647,12 @@ export class RepositorioFake implements EstadiasRepositorio {
       new Date(2026, 7, 5, 17),
     );
 
-    // Creche recorrente — Seg/Qua/Sex ao longo de agosto.
+    // Creche recorrente — Seg/Qua/Sex ao longo de agosto. So o Rex: o Thor
+    // esta no Hotel de 18 a 22/08 (e e de outro tutor), e com ele a serie
+    // violaria a dupla reserva que o proprio app barra.
     const regra: EntradaAgendamento = {
-      animalIds: [rex.id, thor.id],
-      tipo: 'creche',
+      animalIds: [rex.id],
+      servicos: [{ servico: 'creche', valor: 75, data: null }],
       dataHoraInicio: new Date(2026, 7, 3, 8),
       dataHoraFim: new Date(2026, 7, 28, 18),
       status: 'confirmado',
@@ -649,7 +665,6 @@ export class RepositorioFake implements EstadiasRepositorio {
         horarioEntrada: '08:00',
         horarioSaida: '18:00',
         formaPagamento: 'dinheiro',
-        valorTotal: 900,
       },
       pertencesDeixados: null,
     };
@@ -657,5 +672,26 @@ export class RepositorioFake implements EstadiasRepositorio {
     for (const { inicio, fim } of gerarOcorrencias(regra)) {
       this.inserirUm(regra, inicio, fim, serieId);
     }
+
+    // So extras: banho e tosa, sem estadia.
+    this.inserirUm(
+      {
+        animalIds: [luna.id],
+        servicos: [
+          { servico: 'banho', valor: 60, data: null },
+          { servico: 'tosa_higienica', valor: 40, data: null },
+        ],
+        dataHoraInicio: new Date(2026, 7, 20, 10),
+        dataHoraFim: new Date(2026, 7, 20, 11, 30),
+        status: 'confirmado',
+        recorrente: false,
+        diasSemanaRecorrencia: [],
+        observacoes: null,
+        planoEstadia: null,
+        pertencesDeixados: null,
+      },
+      new Date(2026, 7, 20, 10),
+      new Date(2026, 7, 20, 11, 30),
+    );
   }
 }

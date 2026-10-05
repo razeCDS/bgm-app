@@ -1,8 +1,8 @@
 import {
+  rotuloServico,
   rotuloStatus,
-  rotuloTipo,
+  type ServicoAgendamento,
   type StatusAgendamento,
-  type TipoAgendamento,
 } from '../features/estadias/types/enums';
 
 /*
@@ -28,18 +28,28 @@ export function ChipStatus({ status }: { status: StatusAgendamento }) {
   );
 }
 
-const iconeTipo: Record<TipoAgendamento, string> = {
-  visita: '🤝',
-  hotel: '🏨',
+export const iconeServico: Record<ServicoAgendamento, string> = {
   creche: '☀️',
+  hotel: '🏨',
   banho: '🚿',
+  tosa_higienica: '✂️',
+  consulta: '🩺',
+  visita: '🤝',
 };
 
-export function ChipTipo({ tipo }: { tipo: TipoAgendamento }) {
+/** Os servicos de um agendamento, lado a lado. */
+export function ChipsServicos({ servicos }: { servicos: ServicoAgendamento[] }) {
   return (
-    <span className="flex items-center gap-1 text-xs font-medium text-texto-suave">
-      <span className="text-[13px]">{iconeTipo[tipo]}</span>
-      {rotuloTipo[tipo]}
+    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      {servicos.map((s) => (
+        <span
+          key={s}
+          className="flex items-center gap-1 text-xs font-medium text-texto-suave"
+        >
+          <span className="text-[13px]">{iconeServico[s]}</span>
+          {rotuloServico[s]}
+        </span>
+      ))}
     </span>
   );
 }

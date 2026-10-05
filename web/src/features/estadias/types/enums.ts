@@ -8,7 +8,13 @@
 export type PorteAnimal = 'mini' | 'pequeno' | 'medio' | 'grande';
 export type EspecieAnimal = 'canina' | 'felina';
 export type SexoAnimal = 'femea' | 'macho';
-export type TipoAgendamento = 'visita' | 'hotel' | 'creche' | 'banho';
+export type ServicoAgendamento =
+  | 'creche'
+  | 'hotel'
+  | 'banho'
+  | 'tosa_higienica'
+  | 'consulta'
+  | 'visita';
 export type StatusAgendamento =
   | 'solicitado'
   | 'confirmado'
@@ -21,7 +27,15 @@ export type FormaPagamento = 'pix' | 'dinheiro';
 export const PORTES: PorteAnimal[] = ['mini', 'pequeno', 'medio', 'grande'];
 export const ESPECIES: EspecieAnimal[] = ['canina', 'felina'];
 export const SEXOS: SexoAnimal[] = ['femea', 'macho'];
-export const TIPOS_AGENDAMENTO: TipoAgendamento[] = ['visita', 'hotel', 'creche', 'banho'];
+/** Ordem de exibicao: no formulario, nos chips e no titulo do Google. */
+export const SERVICOS: ServicoAgendamento[] = [
+  'creche',
+  'hotel',
+  'banho',
+  'tosa_higienica',
+  'consulta',
+  'visita',
+];
 export const STATUS_AGENDAMENTO: StatusAgendamento[] = [
   'solicitado',
   'confirmado',
@@ -49,11 +63,20 @@ export const rotuloSexo: Record<SexoAnimal, string> = {
   macho: 'Macho',
 };
 
-export const rotuloTipo: Record<TipoAgendamento, string> = {
-  visita: 'Visita',
-  hotel: 'Hotel',
+/** Rotulo curto: chips da lista, filtro e titulo do evento no Google. */
+export const rotuloServico: Record<ServicoAgendamento, string> = {
   creche: 'Creche',
-  banho: 'Banho'
+  hotel: 'Hotel',
+  banho: 'Banho',
+  tosa_higienica: 'Tosa higiênica',
+  consulta: 'Consulta',
+  visita: 'Visita',
+};
+
+/** Texto do checkbox no formulario, onde cabe o detalhe. */
+export const rotuloServicoCompleto: Record<ServicoAgendamento, string> = {
+  ...rotuloServico,
+  creche: 'Creche — período integral',
 };
 
 export const rotuloStatus: Record<StatusAgendamento, string> = {
@@ -76,26 +99,81 @@ export const rotuloFormaPagamento: Record<FormaPagamento, string> = {
   dinheiro: 'Dinheiro',
 };
 
-// ── Regras por tipo de agendamento ────────────────────────────────────────
+// ── Regras por servico ────────────────────────────────────────────────────
+//
+// Um agendamento reune um ou mais servicos. Os PRINCIPAIS (Creche, Hotel,
+// Visita) definem a estrutura dele — de onde vem o horario, se ha plano, se
+// ha pertences. Os EXTRAS (Banho, Tosa, Consulta) so somam um servico e um
+// valor, sozinhos ou junto de Creche/Hotel.
+//
+// Todas as regras recebem a LISTA de servicos: e a combinacao que decide.
+
+/**
+ * Nao mudam depois de criado: trocar Creche por Hotel mudaria a estrutura
+ * de horario e invalidaria plano, pertences e a propria serie recorrente.
+ * Para trocar, cancela-se e cria-se outro. Extras entram e saem livremente.
+ */
+export const SERVICOS_PRINCIPAIS: ServicoAgendamento[] = ['creche', 'hotel', 'visita'];
+
+export const ePrincipal = (s: ServicoAgendamento) => SERVICOS_PRINCIPAIS.includes(s);
+
+export const SERVICOS_EXTRAS: ServicoAgendamento[] = ['banho', 'tosa_higienica', 'consulta'];
+
+/**
+ * Extras de um Hotel podem ser marcados num dia especifico da estadia (o
+ * banho do dia 20). Na Creche nao precisa: cada dia ja e uma ocorrencia
+ * propria, e o extra vai direto nela.
+ */
+export const permiteDiaEspecifico = (s: ServicoAgendamento[]) => s.includes('hotel');
 
 /**
  * O plano de estadia descreve a **rotina diaria** (tipo de plano, total de
  * dias, horarios de entrada/saida) e so faz sentido na Creche.
  *
  * No Hotel a entrada e a saida sao o proprio periodo do agendamento, entao
- * nao ha plano — apenas o valor da estadia.
+ * nao ha plano.
  */
-export const exigePlanoEstadia = (t: TipoAgendamento) => t === 'creche';
+export const exigePlanoEstadia = (s: ServicoAgendamento[]) => s.includes('creche');
 
-/** Hotel e Creche sao estadias: registram valor e pertences. Visita nao. */
-export const temEstadia = (t: TipoAgendamento) => t === 'hotel' || t === 'creche';
+/** Hotel e Creche sao estadias: o cao passa o dia (ou dias) e deixa pertences. */
+export const temPertences = (s: ServicoAgendamento[]) =>
+  s.includes('creche') || s.includes('hotel');
 
+/** Recorrencia so existe com Creche. */
+export const permiteRecorrencia = (s: ServicoAgendamento[]) => s.includes('creche');
 
-/** Recorrencia so existe para Creche. */
-export const permiteRecorrencia = (t: TipoAgendamento) => t === 'creche';
+/** Visita e so para conhecer o espaco: nao tem valor. */
+export const servicoTemValor = (s: ServicoAgendamento) => s !== 'visita';
 
-/* Banho apresentará somente período e valor. */
-export const eAgendamentoBanho = (t: TipoAgendamento) => t === 'banho';
+/**
+ * Combinacoes permitidas. Retorna a mensagem do erro, ou `null`.
+ *
+ * Olha os servicos DISTINTOS: um Banho em dois dias do Hotel e o mesmo
+ * servico. Repeticao no mesmo dia e checada em `validarAgendamento`.
+ *
+ *  - Creche e Hotel se excluem: um tem horario diario, o outro um periodo
+ *    continuo — juntos, nao haveria de onde tirar o horario.
+ *  - Visita fica sozinha.
+ *
+ * Espelha o trigger `validar_servicos_agendamento` do banco.
+ */
+export function erroCombinacao(lista: ServicoAgendamento[]): string | null {
+  const s = [...new Set(lista)];
+  if (s.length === 0) return 'Selecione ao menos um serviço.';
+  if (s.includes('creche') && s.includes('hotel')) {
+    return 'Creche e Hotel não podem ser marcados juntos.';
+  }
+  if (s.includes('visita') && s.length > 1) {
+    return 'Visita não pode ser combinada com outros serviços.';
+  }
+  return null;
+}
+
+/** Marcar `servico` junto dos ja marcados formaria uma combinacao invalida? */
+export const servicoIncompativel = (
+  servico: ServicoAgendamento,
+  marcados: ServicoAgendamento[],
+) => !marcados.includes(servico) && erroCombinacao([...marcados, servico]) !== null;
 
 // ── Dias da semana ────────────────────────────────────────────────────────
 

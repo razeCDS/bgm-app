@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { Botao } from '../../../components/botoes';
+import { iconeServico } from '../../../components/chips';
 import {
   Campo,
   Dica,
+  LinhaCheckbox,
   LinhaSwitch,
   Pilula,
   Rodape,
@@ -19,7 +21,7 @@ import { useDialogo } from '../../../components/dialogo';
 import { Carregando, EstadoErro } from '../../../components/estados';
 import { Spinner } from '../../../components/spinner';
 import { mensagemDeErro } from '../../../lib/erros';
-import { formatarData, formatarHora } from '../../../lib/formatadores';
+import { formatarData, formatarHora, formatarMoeda } from '../../../lib/formatadores';
 import { useVoltar } from '../../../lib/navegacao';
 import {
   useAgendamento,
@@ -33,6 +35,7 @@ import {
 } from '../hooks';
 import {
   comHorario,
+  diasDaEstadia,
   fimDaJanela,
   gerarOcorrencias,
   validarAgendamento,
@@ -41,34 +44,48 @@ import {
 import {
   abreviadoDiaSemana,
   DIAS_SEMANA,
-  eAgendamentoBanho,
+  diaSemanaDe,
+  ePrincipal,
   exigePlanoEstadia,
   FORMAS_PAGAMENTO,
+  permiteDiaEspecifico,
   permiteRecorrencia,
   rotuloFormaPagamento,
+  rotuloServico,
+  rotuloServicoCompleto,
   rotuloStatus,
-  rotuloTipo,
   rotuloTipoPlano,
+  SERVICOS,
+  SERVICOS_EXTRAS,
+  servicoIncompativel,
+  servicoTemValor,
   STATUS_AGENDAMENTO,
-  temEstadia,
-  TIPOS_AGENDAMENTO,
+  temPertences,
   TIPOS_PLANO,
   type DiaSemana,
   type FormaPagamento,
+  type ServicoAgendamento,
   type StatusAgendamento,
-  type TipoAgendamento,
   type TipoPlano,
 } from '../types/enums';
-import type { Agendamento } from '../types/modelos';
+import {
+  chaveServico,
+  ordenarServicos,
+  valorEPorDia,
+  valorTotalDe,
+  type Agendamento,
+  type ServicoContratado,
+} from '../types/modelos';
 
 /**
  * Criacao e edicao de agendamento.
  *
- * Secoes condicionais:
- *  - Plano de estadia (rotina diaria): so Creche
- *  - Valor + Pertences: Hotel e Creche
- *  - Valor: Banho (sem pertences)
- *  - Recorrencia: so Creche
+ * Secoes condicionais, decididas pela COMBINACAO de servicos marcados:
+ *  - Data (sem horario) + Plano de estadia + Recorrencia: com Creche
+ *  - Periodo (inicio e fim): sem Creche
+ *  - Dias da hospedagem (extras num dia especifico): com Hotel
+ *  - Pertences: com Creche ou Hotel
+ *  - Valores: um campo por servico (e por dia), menos Visita
  */
 export function FormAgendamento({ agendamentoId }: { agendamentoId?: string }) {
   const consulta = useAgendamento(agendamentoId);
@@ -97,7 +114,18 @@ function valoresIniciais(a: Agendamento | undefined) {
     // O tutor nao e guardado no agendamento: deduzimos pelo primeiro cao.
     tutorId: a?.animais?.[0]?.tutorId ?? null,
     animalIds: a?.animalIds ?? [],
-    tipo: a?.tipo ?? ('creche' as TipoAgendamento),
+    // Os checkboxes marcam o servico SEM dia; os extras com dia (Hotel) tem
+    // estado proprio, editado na secao "Dias da hospedagem".
+    servicos: [
+      ...new Set((a?.servicos ?? []).filter((s) => !s.data).map((s) => s.servico)),
+    ],
+    extrasPorDia: (a?.servicos ?? [])
+      .filter((s) => s.data)
+      .map((s) => ({ servico: s.servico, data: s.data! })),
+    // Texto de cada campo de valor, por servico + dia (`chaveServico`).
+    valores: Object.fromEntries(
+      (a?.servicos ?? []).map((s) => [chaveServico(s), s.valor != null ? String(s.valor) : '']),
+    ) as Record<string, string>,
     status: a?.status ?? ('solicitado' as StatusAgendamento),
     inicio: a?.dataHoraInicio ?? new Date(),
     fim: a?.dataHoraFim ?? null,
@@ -114,7 +142,6 @@ function valoresIniciais(a: Agendamento | undefined) {
     horaEntrada: p?.horarioEntrada ?? null,
     horaSaida: p?.horarioSaida ?? null,
     formaPagamento: p?.formaPagamento ?? null,
-    valorTotal: p?.valorTotal != null ? String(p.valorTotal) : '',
 
     temCaminha: d?.temCaminha ?? false,
     corCaminha: d?.corCaminha ?? '',
@@ -163,7 +190,9 @@ function Formulario({
   const [ini] = useState(() => valoresIniciais(original));
   const [tutorId, setTutorId] = useState<string | null>(ini.tutorId);
   const [animalIds, setAnimalIds] = useState<string[]>(ini.animalIds);
-  const [tipo, setTipo] = useState<TipoAgendamento>(ini.tipo);
+  const [servicos, setServicos] = useState<ServicoAgendamento[]>(ini.servicos);
+  const [extrasPorDia, setExtrasPorDia] = useState<ExtraNoDia[]>(ini.extrasPorDia);
+  const [valores, setValores] = useState(ini.valores);
   const [status, setStatus] = useState<StatusAgendamento>(ini.status);
   const [inicio, setInicio] = useState<Date>(ini.inicio);
   const [fim, setFim] = useState<Date | null>(ini.fim);
@@ -181,8 +210,6 @@ function Formulario({
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento | null>(
     ini.formaPagamento,
   );
-  // Valor (hotel, creche e banho)
-  const [valorTotal, setValorTotal] = useState(ini.valorTotal);
 
   // Pertences
   const [temCaminha, setTemCaminha] = useState(ini.temCaminha);
@@ -196,19 +223,66 @@ function Formulario({
   const [vezes, setVezes] = useState(ini.vezes);
   const [obsPertences, setObsPertences] = useState(ini.obsPertences);
 
-  const comPlano = exigePlanoEstadia(tipo);
-  const comEstadia = temEstadia(tipo);
-  const comRecorrencia = permiteRecorrencia(tipo);
-  const eBanho = eAgendamentoBanho(tipo);
+  const comPlano = exigePlanoEstadia(servicos);
+  const comPertences = temPertences(servicos);
+  const comRecorrencia = permiteRecorrencia(servicos);
+  const comDias = permiteDiaEspecifico(servicos);
+
+  // Tudo o que foi contratado: os marcados sem dia e os extras por dia.
+  const contratados = ordenarServicos([
+    ...servicos.map((s) => ({ servico: s, data: null as Date | null })),
+    ...extrasPorDia,
+  ]);
+  // Para as regras de combinacao, o que conta e o servico, nao o dia.
+  const todosServicos = [...new Set(contratados.map((c) => c.servico))];
+  const comValor = contratados.filter((c) => servicoTemValor(c.servico));
+  const diasHospedagem = comDias ? diasDaEstadia(inicio, fim) : [];
 
   const caesDoTutor = (animais.data ?? []).filter((a) => a.tutorId === tutorId);
 
   const numeroSemanas = Number(semanas);
   const semanasOk = Number.isInteger(numeroSemanas) && numeroSemanas > 0;
 
+  /**
+   * Marca/desmarca mantendo a ordem de `SERVICOS`, para a lista sair igual
+   * no banco, nos chips e no titulo do Google, seja qual for a ordem dos
+   * toques.
+   */
+  function alternarServico(servico: ServicoAgendamento, marcar: boolean) {
+    const novos = SERVICOS.filter((s) =>
+      s === servico ? marcar : servicos.includes(s),
+    );
+    setServicos(novos);
+    if (!permiteRecorrencia(novos)) {
+      setRecorrente(false);
+      setDias([]);
+    }
+    // Sem Hotel nao ha dias de hospedagem (so acontece na criacao: na
+    // edicao o Hotel e travado).
+    if (!permiteDiaEspecifico(novos)) setExtrasPorDia([]);
+  }
+
+  function alternarExtraNoDia(servico: ServicoAgendamento, dia: Date) {
+    const mesmo = (x: ExtraNoDia) =>
+      x.servico === servico && x.data.getTime() === dia.getTime();
+    setExtrasPorDia(
+      extrasPorDia.some(mesmo)
+        ? extrasPorDia.filter((x) => !mesmo(x))
+        : [...extrasPorDia, { servico, data: dia }],
+    );
+  }
+
   function montarEntrada(): EntradaAgendamento {
-    const valor = Number(valorTotal.replace(',', '.'));
-    const valorOk = valorTotal.trim() !== '' && !Number.isNaN(valor);
+    // Valor livre: vazio ou ilegivel vira "nao informado", e nao zero.
+    const lerValor = (texto: string | undefined) => {
+      const v = Number((texto ?? '').replace(',', '.'));
+      return texto?.trim() && !Number.isNaN(v) ? v : null;
+    };
+    const servicosEntrada: ServicoContratado[] = contratados.map((c) => ({
+      servico: c.servico,
+      data: c.data,
+      valor: servicoTemValor(c.servico) ? lerValor(valores[chaveServico(c)]) : null,
+    }));
 
     let plano: EntradaAgendamento['planoEstadia'] = null;
     if (comPlano) {
@@ -220,17 +294,6 @@ function Formulario({
         horarioEntrada: horaEntrada,
         horarioSaida: horaSaida,
         formaPagamento,
-        valorTotal: valorOk ? valor : null,
-      };
-    } else if ((comEstadia || eBanho) && valorOk) {
-      // Hotel e Banho: nao tem plano; o valor e guardado sozinho.
-      plano = {
-        tipoPlano: null,
-        totalDias: null,
-        horarioEntrada: null,
-        horarioSaida: null,
-        formaPagamento: null,
-        valorTotal: valor,
       };
     }
 
@@ -250,7 +313,7 @@ function Formulario({
 
     return {
       animalIds,
-      tipo,
+      servicos: servicosEntrada,
       dataHoraInicio: dataInicio,
       dataHoraFim: dataFim,
       status,
@@ -258,7 +321,7 @@ function Formulario({
       diasSemanaRecorrencia: comRecorrencia ? dias : [],
       observacoes: observacoes.trim() || null,
       planoEstadia: plano,
-      pertencesDeixados: comEstadia
+      pertencesDeixados: comPertences
         ? {
             temCaminha,
             corCaminha: corCaminha.trim() || null,
@@ -415,31 +478,33 @@ function Formulario({
           </fieldset>
 
           <Seletor
-            rotulo="Tipo *"
-            valor={tipo}
-            opcoes={TIPOS_AGENDAMENTO}
-            rotuloDe={(t) => rotuloTipo[t]}
-            // Trocar o tipo depois de criado invalidaria plano, pertences e a
-            // propria serie recorrente — cada tipo guarda dados diferentes.
-            // Para mudar, cancela-se este e cria-se outro.
-            bloqueado={editando}
-            dicaBloqueio="O tipo não pode ser alterado. Cancele este agendamento e crie outro."
-            aoSelecionar={(t) => {
-              if (!t) return;
-              setTipo(t);
-              if (!permiteRecorrencia(t)) {
-                setRecorrente(false);
-                setDias([]);
-              }
-            }}
-          />
-          <Seletor
             rotulo="Status"
             valor={status}
             opcoes={STATUS_AGENDAMENTO}
             rotuloDe={(v) => rotuloStatus[v]}
             aoSelecionar={(v) => v && setStatus(v)}
           />
+        </Secao>
+
+        <Secao titulo="Serviços *">
+          {SERVICOS.map((s) => (
+            <LinhaCheckbox
+              key={s}
+              titulo={rotuloServicoCompleto[s]}
+              valor={servicos.includes(s)}
+              aoMudar={(marcar) => alternarServico(s, marcar)}
+              // Principais definem a estrutura do agendamento (horario,
+              // plano, pertences, serie): trocar depois invalidaria tudo
+              // isso. Extras continuam livres na edicao.
+              bloqueado={editando && ePrincipal(s)}
+              desabilitado={servicoIncompativel(s, todosServicos)}
+            />
+          ))}
+          <Dica>
+            {editando
+              ? 'Creche, Hotel e Visita não podem ser alterados. Para trocar, cancele este agendamento e crie outro.'
+              : 'Creche e Hotel não se combinam; Visita é sempre sozinha.'}
+          </Dica>
         </Secao>
 
         {comPlano ? (
@@ -466,6 +531,40 @@ function Formulario({
             <Dica>A data final é opcional.</Dica>
           </Secao>
         )}
+
+        {comDias ? (
+          <Secao titulo="Dias da hospedagem">
+            <div className="mb-2">
+              <Dica>
+                Toque num serviço para marcá-lo num dia específico. Os marcados em
+                Serviços valem para a estadia toda.
+              </Dica>
+            </div>
+            <ul>
+              {diasHospedagem.map((d) => (
+                <li
+                  key={d.getTime()}
+                  className="flex flex-wrap items-center gap-2 border-b border-neutra/40 py-2 last:border-b-0"
+                >
+                  <span className="w-20 shrink-0 text-sm text-texto-escuro">
+                    {abreviadoDiaSemana[diaSemanaDe(d)]} {formatarData(d).slice(0, 5)}
+                  </span>
+                  {SERVICOS_EXTRAS.map((s) => (
+                    <Pilula
+                      key={s}
+                      ativo={extrasPorDia.some(
+                        (x) => x.servico === s && x.data.getTime() === d.getTime(),
+                      )}
+                      aoTocar={() => alternarExtraNoDia(s, d)}
+                    >
+                      {iconeServico[s]} {rotuloServico[s]}
+                    </Pilula>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </Secao>
+        ) : null}
 
         {comRecorrencia ? (
           <Secao titulo="Recorrência">
@@ -544,93 +643,83 @@ function Formulario({
           </Secao>
         ) : null}
 
-        {comEstadia ? (
-          <>
-            <Secao titulo="Valor">
-              {/*
-                Creche: o valor e POR DIA. Cada ocorrencia da serie tem sua
-                propria linha em `planos_estadia`, entao um valor de pacote
-                aqui seria replicado em todas e qualquer soma daria o total
-                multiplicado pelo numero de dias.
-              */}
-              <Campo
-                rotulo={comPlano ? 'Valor da diária' : 'Valor total da estadia'}
-                valor={valorTotal}
-                aoMudar={setValorTotal}
-                teclado="decimal"
-                prefixo="R$"
-              />
-              {comPlano ? (
-                <>
-                  <div className="mb-3.5 -mt-2">
-                    <Dica>
-                      Valor cobrado por dia. Numa recorrência, vale para cada ocorrência
-                      gerada.
-                    </Dica>
-                  </div>
-                  <Seletor
-                    rotulo="Forma de pagamento"
-                    valor={formaPagamento}
-                    opcoes={FORMAS_PAGAMENTO}
-                    rotuloDe={(f) => rotuloFormaPagamento[f]}
-                    aoSelecionar={setFormaPagamento}
-                    permiteVazio
-                    textoVazio="Nenhuma"
-                  />
-                </>
-              ) : null}
-            </Secao>
-
-            <Secao titulo="Pertences deixados">
-              <LinhaSwitch titulo="Caminha" valor={temCaminha} aoMudar={setTemCaminha} />
-              {temCaminha ? (
-                <Campo rotulo="Cor da caminha" valor={corCaminha} aoMudar={setCorCaminha} />
-              ) : null}
-              <LinhaSwitch titulo="Roupa" valor={temRoupa} aoMudar={setTemRoupa} />
-              {temRoupa ? (
-                <Campo rotulo="Cor da roupa" valor={corRoupa} aoMudar={setCorRoupa} />
-              ) : null}
-              <LinhaSwitch titulo="Brinquedo" valor={temBrinquedo} aoMudar={setTemBrinquedo} />
-              {temBrinquedo ? (
+        {comValor.length > 0 ? (
+          <Secao titulo="Valores">
+            {/*
+              Um campo por servico, livre e opcional — nao ha tabela de
+              precos. Com Creche os valores sao POR DIA: cada ocorrencia da
+              serie tem sua propria copia dos servicos, entao um valor de
+              pacote aqui seria replicado em todas e qualquer soma daria o
+              total multiplicado pelo numero de dias.
+            */}
+            {comValor.map((c) => {
+              const chave = chaveServico(c);
+              return (
                 <Campo
-                  rotulo="Qual brinquedo"
-                  valor={qualBrinquedo}
-                  aoMudar={setQualBrinquedo}
+                  key={chave}
+                  rotulo={rotuloValor(c, comDias)}
+                  valor={valores[chave] ?? ''}
+                  aoMudar={(v) => setValores({ ...valores, [chave]: v })}
+                  teclado="decimal"
+                  prefixo="R$"
                 />
-              ) : null}
-              <Campo rotulo="Ração" valor={racao} aoMudar={setRacao} />
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <Campo rotulo="Quantidade" valor={quantidade} aoMudar={setQuantidade} />
+              );
+            })}
+            {comValor.length > 1 ? <TotalValores servicos={montarEntrada().servicos} /> : null}
+            {comPlano ? (
+              <>
+                <div className="mb-3.5 -mt-2">
+                  <Dica>
+                    Valores cobrados por dia. Numa recorrência, valem para cada ocorrência
+                    gerada.
+                  </Dica>
                 </div>
-                <div className="flex-1">
-                  <Campo rotulo="Vezes ao dia" valor={vezes} aoMudar={setVezes} />
-                </div>
-              </div>
-              <Campo
-                rotulo="Observações dos pertences"
-                valor={obsPertences}
-                aoMudar={setObsPertences}
-                multilinha
-              />
-            </Secao>
-          </>
+                <Seletor
+                  rotulo="Forma de pagamento"
+                  valor={formaPagamento}
+                  opcoes={FORMAS_PAGAMENTO}
+                  rotuloDe={(f) => rotuloFormaPagamento[f]}
+                  aoSelecionar={setFormaPagamento}
+                  permiteVazio
+                  textoVazio="Nenhuma"
+                />
+              </>
+            ) : null}
+          </Secao>
         ) : null}
 
-        {/*
-          Banho tem secao propria em vez de entrar no bloco `comEstadia`:
-          registra valor, mas nao pertences. Forma de pagamento ficou de fora
-          — se um dia fizer sentido, e trocar a condicao dela por `eBanho`,
-          nao `comPlano` (que so vale para Creche).
-        */}
-        {eBanho ? (
-          <Secao titulo="Valor">
+        {comPertences ? (
+          <Secao titulo="Pertences deixados">
+            <LinhaSwitch titulo="Caminha" valor={temCaminha} aoMudar={setTemCaminha} />
+            {temCaminha ? (
+              <Campo rotulo="Cor da caminha" valor={corCaminha} aoMudar={setCorCaminha} />
+            ) : null}
+            <LinhaSwitch titulo="Roupa" valor={temRoupa} aoMudar={setTemRoupa} />
+            {temRoupa ? (
+              <Campo rotulo="Cor da roupa" valor={corRoupa} aoMudar={setCorRoupa} />
+            ) : null}
+            <LinhaSwitch titulo="Brinquedo" valor={temBrinquedo} aoMudar={setTemBrinquedo} />
+            {temBrinquedo ? (
+              <Campo
+                rotulo="Qual brinquedo"
+                valor={qualBrinquedo}
+                aoMudar={setQualBrinquedo}
+              />
+            ) : null}
+            <Campo rotulo="Ração" valor={racao} aoMudar={setRacao} />
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Campo rotulo="Quantidade" valor={quantidade} aoMudar={setQuantidade} />
+              </div>
+              <div className="flex-1">
+                <Campo rotulo="Vezes ao dia" valor={vezes} aoMudar={setVezes} />
+              </div>
+            </div>
             <Campo
-              rotulo="Valor do(s) banho(s)"
-              valor={valorTotal}
-              aoMudar={setValorTotal}
-              teclado="decimal"
-              prefixo="R$"
+              rotulo="Observações dos pertences"
+              valor={obsPertences}
+              aoMudar={setObsPertences}
+              multilinha
             />
           </Secao>
         ) : null}
@@ -673,6 +762,36 @@ function Formulario({
         </Botao>
       </Rodape>
     </>
+  );
+}
+
+/** Extra marcado num dia especifico da hospedagem. */
+interface ExtraNoDia {
+  servico: ServicoAgendamento;
+  data: Date;
+}
+
+/** Rotulo do campo de valor: diz a que o numero se refere. */
+function rotuloValor(
+  c: { servico: ServicoAgendamento; data: Date | null },
+  hospedagem: boolean,
+): string {
+  if (c.data) return `${rotuloServico[c.servico]} — ${formatarData(c.data).slice(0, 5)}`;
+  if (c.servico === 'creche') return 'Creche (diária)';
+  if (c.servico === 'hotel') return 'Hotel (estadia completa)';
+  // No Hotel, separa do mesmo extra marcado num dia especifico.
+  return hospedagem ? `${rotuloServico[c.servico]} (durante a estadia)` : rotuloServico[c.servico];
+}
+
+/** Soma dos valores, quando ha mais de um servico com valor. */
+function TotalValores({ servicos }: { servicos: ServicoContratado[] }) {
+  const total = valorTotalDe(servicos);
+  if (total == null) return null;
+  return (
+    <p className="mb-3.5 -mt-1 text-right text-[13px] font-semibold text-primaria-escura">
+      Total: {formatarMoeda(total)}
+      {valorEPorDia(servicos) ? ' por dia' : ''}
+    </p>
   );
 }
 

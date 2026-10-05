@@ -321,6 +321,48 @@ export function LinhaSwitch({
   );
 }
 
+/**
+ * Caixa de marcar com texto, para escolhas multiplas que sao itens de uma
+ * lista (servicos), e nao liga/desliga de uma opcao (isso e o `LinhaSwitch`).
+ *
+ * `desabilitado` = a combinacao nao permite agora; `bloqueado` = nao muda
+ * mais (mostra 🔒), mesmo comportamento do `Seletor`.
+ */
+export function LinhaCheckbox({
+  titulo,
+  valor,
+  aoMudar,
+  desabilitado,
+  bloqueado,
+}: {
+  titulo: string;
+  valor: boolean;
+  aoMudar: (v: boolean) => void;
+  desabilitado?: boolean;
+  bloqueado?: boolean;
+}) {
+  const inativo = desabilitado || bloqueado;
+  return (
+    // So o desabilitado esmaece: um bloqueado marcado continua sendo parte
+    // do agendamento, e precisa ler como tal.
+    <label
+      className={`flex items-center gap-3 py-2 ${
+        inativo ? 'cursor-not-allowed' : 'cursor-pointer'
+      } ${desabilitado ? 'opacity-50' : ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={valor}
+        disabled={inativo}
+        onChange={(e) => aoMudar(e.target.checked)}
+        className="size-5 shrink-0 accent-primaria"
+      />
+      <span className="flex-1 text-[15px] text-texto-escuro">{titulo}</span>
+      {bloqueado ? <span className="text-sm">🔒</span> : null}
+    </label>
+  );
+}
+
 // ── Secao ─────────────────────────────────────────────────────────────────
 
 export function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {

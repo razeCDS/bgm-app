@@ -1,24 +1,27 @@
+import { deInputData, paraInputData } from '../../../lib/datas-input';
 import { horaCurta } from '../../../lib/formatadores';
 import type {
   DiaSemana,
   EspecieAnimal,
   FormaPagamento,
   PorteAnimal,
+  ServicoAgendamento,
   SexoAnimal,
   StatusAgendamento,
-  TipoAgendamento,
   TipoPlano,
 } from '../types/enums';
-import type {
-  Agendamento,
-  Anamnese,
-  Animal,
-  ContatoEmergencia,
-  PertencesDeixados,
-  PlanoEstadia,
-  TermoConsentimento,
-  Tutor,
-  VeterinarioInfo,
+import {
+  ordenarServicos,
+  type Agendamento,
+  type Anamnese,
+  type Animal,
+  type ContatoEmergencia,
+  type PertencesDeixados,
+  type PlanoEstadia,
+  type ServicoContratado,
+  type TermoConsentimento,
+  type Tutor,
+  type VeterinarioInfo,
 } from '../types/modelos';
 
 /**
@@ -203,7 +206,6 @@ export const planoDeLinha = (l: Linha): PlanoEstadia => ({
   horarioEntrada: horaCurta(l.horario_entrada),
   horarioSaida: horaCurta(l.horario_saida),
   formaPagamento: (l.forma_pagamento as FormaPagamento) ?? null,
-  valorTotal: l.valor_total == null ? null : Number(l.valor_total),
 });
 
 export const planoParaLinha = (p: PlanoEstadia): Linha => ({
@@ -212,8 +214,25 @@ export const planoParaLinha = (p: PlanoEstadia): Linha => ({
   horario_entrada: paraHora(p.horarioEntrada),
   horario_saida: paraHora(p.horarioSaida),
   forma_pagamento: p.formaPagamento,
-  valor_total: p.valorTotal,
 });
+
+// ── Servicos ──
+
+export const servicoDeLinha = (l: Linha): ServicoContratado => ({
+  servico: l.servico as ServicoAgendamento,
+  // `numeric` chega como string ou number, conforme o tamanho.
+  valor: l.valor == null ? null : Number(l.valor),
+  // Coluna `date` ("2026-08-20"): lida no fuso local, senao volta um dia.
+  data: deInputData(l.data ?? ''),
+});
+
+/** Formato do parametro `p_servicos` das RPCs: `[{servico, valor, data}]`. */
+export const servicosParaLinha = (lista: ServicoContratado[]): Linha[] =>
+  lista.map((s) => ({
+    servico: s.servico,
+    valor: s.valor,
+    data: s.data ? paraInputData(s.data) : null,
+  }));
 
 export const pertencesDeLinha = (l: Linha): PertencesDeixados => ({
   id: l.id,
@@ -263,7 +282,8 @@ export const agendamentoDeLinha = (l: Linha): Agendamento => {
   return {
     id: l.id,
     animalIds: vinculos.map((v) => v.animal_id as string),
-    tipo: l.tipo as TipoAgendamento,
+    // O embed nao garante ordem; a lista e exibida sempre na de `SERVICOS`.
+    servicos: ordenarServicos(((l.agendamento_servicos ?? []) as Linha[]).map(servicoDeLinha)),
     dataHoraInicio: new Date(l.data_hora_inicio),
     dataHoraFim: data(l.data_hora_fim),
     status: l.status as StatusAgendamento,

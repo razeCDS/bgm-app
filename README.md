@@ -26,6 +26,8 @@ problema que resolve.
 | `05_agendamento_varios_animais.sql` | Um agendamento passa a atender vários cães (tabela de junção) |
 | `06_rpc_agendamento_atomico.sql` | Criar/editar agendamento numa transação só — sem registros órfãos |
 | `07_revoke_enfileirar_sync.sql` | Fecha a RPC pública que disparava o sync |
+| `08_servicos_agendamento.sql` | Troca o tipo único do agendamento por uma lista de serviços, cada um com seu valor |
+| `09_servicos_por_dia.sql` | Extras do Hotel num dia específico da estadia |
 
 ### Edge Function `sincronizar-agenda`
 
@@ -47,19 +49,33 @@ todos os dados — por isso o cadastro público precisa ficar desligado.
 
 - **Tutor é o principal**: é ele quem reserva. Um agendamento pode atender
   vários cães, todos do mesmo tutor.
-- **Tipos**:
-  - **Creche** — tem plano de estadia (rotina diária: horários de entrada e
-    saída obrigatórios, tipo de plano, forma de pagamento), valor **por dia**
-    e pertences. É o único tipo com recorrência.
-  - **Hotel** — o período do agendamento é a própria estadia; tem valor total
-    e pertences, sem plano.
-  - **Banho** — só período e valor.
-  - **Visita** — sem plano, valor nem pertences.
-- **O tipo não muda depois de criado**: cada tipo guarda dados diferentes.
-  Para trocar, cancela-se e cria-se outro.
+- **Serviços**: cada agendamento tem um ou mais, cada um com seu valor
+  (livre e opcional — não há tabela de preços).
+  - **Principais** — definem a estrutura do agendamento:
+    - **Creche (período integral)** — só a data; os horários vêm do plano de
+      estadia (rotina diária: entrada e saída obrigatórias, tipo de plano,
+      forma de pagamento). Tem pertences e é a única com recorrência.
+    - **Hotel** — o período do agendamento é a própria estadia; tem
+      pertences, sem plano.
+    - **Visita** — sempre sozinha, sem valor, plano nem pertences.
+  - **Extras** — **Banho**, **Tosa higiênica** e **Consulta**: sozinhos (só
+    período e valor) ou somados a Creche/Hotel.
+  - Creche e Hotel não podem ser marcados juntos.
+- **Extras num dia da hospedagem** (só Hotel): o formulário lista os dias
+  da estadia e cada extra pode ser marcado num dia específico (o banho do
+  dia 20), inclusive em mais de um dia. Sem dia, vale para a estadia toda.
+  O dia precisa estar dentro da estadia. No Google, o evento continua um só
+  e a descrição lista os serviços com os dias.
+- **Valores**: com Creche, cada valor é **por dia** (a série copia os
+  serviços em cada ocorrência); no Hotel, é o da estadia inteira. A lista
+  mostra a soma.
+- **Principais não mudam depois de criado**: cada um guarda dados
+  diferentes. Para trocar, cancela-se e cria-se outro. Extras entram e saem
+  na edição.
 - **Recorrência** (Creche): informada em semanas + dias da semana. Gera uma
-  linha por ocorrência; todas compartilham `agendamento_recorrencia_id`, então
-  dá para cancelar um dia sem afetar os outros — ou a série inteira, que
+  linha por ocorrência, com os mesmos serviços em todas; todas compartilham
+  `agendamento_recorrencia_id`, então dá para cancelar um dia (ou incluir um
+  banho nele) sem afetar os outros — ou cancelar a série inteira, o que
   cancela só as ocorrências futuras (as passadas são registro de frequência).
 - **Cancelar** muda o status para `cancelado`; o registro nunca é apagado. No
   Google Agenda, o evento é removido.
@@ -69,4 +85,4 @@ todos os dados — por isso o cadastro público precisa ficar desligado.
   da equipe e nunca bloqueiam um agendamento.
 - **Dias da semana** seguem a convenção do Postgres (`0` = domingo), que
   coincide com `Date.getDay()` do JavaScript.
-- **CPF/CNPJ** aceita nulo no banco, mas é obrigatório no formulário.
+- **CPF/CNPJ** do tutor é obrigatório — no formulário e no banco (`NOT NULL`).

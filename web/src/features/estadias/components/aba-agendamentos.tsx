@@ -4,13 +4,13 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 
 import { classesFab } from '../../../components/botoes';
-import { ChipStatus, ChipTipo } from '../../../components/chips';
+import { ChipsServicos, ChipStatus } from '../../../components/chips';
 import { Carregando, EstadoErro, EstadoVazio } from '../../../components/estados';
 import { mensagemDeErro } from '../../../lib/erros';
 import { formatarIntervalo, formatarMoeda } from '../../../lib/formatadores';
 import { useAgendamentos, useFiltroAgendamentos } from '../hooks';
 import type { Agendamento } from '../types/modelos';
-import { filtroEstaVazio } from '../types/modelos';
+import { filtroEstaVazio, servicosDe, valorEPorDia, valorTotalDe } from '../types/modelos';
 import { PainelFiltros } from './painel-filtros';
 
 /**
@@ -128,7 +128,7 @@ function Cartao({ linha }: { linha: Linha }) {
   const a = linha.destaque;
   const cancelado = a.status === 'cancelado';
   const serie = linha.total > 1;
-  const valor = a.planoEstadia?.valorTotal;
+  const valor = valorTotalDe(a.servicos);
 
   return (
     <Link
@@ -168,7 +168,7 @@ function Cartao({ linha }: { linha: Linha }) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <ChipTipo tipo={a.tipo} />
+        <ChipsServicos servicos={servicosDe(a.servicos)} />
         <span className="flex-1 text-xs text-texto-suave">
           {/* Serie encerrada destaca a ULTIMA ocorrencia — "Próxima" ai
               apontaria para uma data que ja passou. */}
@@ -188,11 +188,11 @@ function Cartao({ linha }: { linha: Linha }) {
             <span />
           )}
           {valor != null ? (
-            // Na Creche o valor e da diaria; sem o sufixo, o numero de uma
-            // ocorrencia parece o total da serie.
+            // Soma dos servicos. Com Creche os valores sao por dia; sem o
+            // sufixo, o numero de uma ocorrencia parece o total da serie.
             <span className="text-[13px] font-semibold text-primaria-escura">
               {formatarMoeda(valor)}
-              {a.tipo === 'creche' ? '/dia' : ''}
+              {valorEPorDia(a.servicos) ? '/dia' : ''}
             </span>
           ) : null}
         </div>

@@ -1,15 +1,24 @@
+import { formatarData } from '../../../lib/formatadores';
 import {
+  ePrincipal,
+  erroCombinacao,
   exigePlanoEstadia,
+  permiteDiaEspecifico,
   permiteRecorrencia,
-  rotuloTipo,
+  rotuloServico,
+  servicoTemValor,
+  temPertences,
   type DiaSemana,
+  type ServicoAgendamento,
   type StatusAgendamento,
-  type TipoAgendamento,
 } from './enums';
-import type {
-  Agendamento,
-  PertencesDeixados,
-  PlanoEstadia,
+import {
+  chaveServico,
+  servicosDe,
+  type Agendamento,
+  type PertencesDeixados,
+  type PlanoEstadia,
+  type ServicoContratado,
 } from './modelos';
 
 /**
@@ -19,7 +28,7 @@ import type {
 export interface EntradaAgendamento {
   /** Um ou mais animais do mesmo tutor. */
   animalIds: string[];
-  tipo: TipoAgendamento;
+  servicos: ServicoContratado[];
   dataHoraInicio: Date;
   dataHoraFim: Date | null;
   status: StatusAgendamento;
@@ -33,13 +42,13 @@ export interface EntradaAgendamento {
 /** Deve gerar uma serie de ocorrencias via RPC. */
 export const geraRecorrencia = (e: EntradaAgendamento) =>
   e.recorrente &&
-  permiteRecorrencia(e.tipo) &&
+  permiteRecorrencia(servicosDe(e.servicos)) &&
   e.diasSemanaRecorrencia.length > 0;
 
 export function entradaDe(a: Agendamento): EntradaAgendamento {
   return {
     animalIds: a.animalIds,
-    tipo: a.tipo,
+    servicos: a.servicos,
     dataHoraInicio: a.dataHoraInicio,
     dataHoraFim: a.dataHoraFim,
     status: a.status,
@@ -81,6 +90,22 @@ export function periodoOcupado(
   const minimo = new Date(inicio.getTime() + 60_000);
   const bruto = fim ?? new Date(inicio.getTime() + 3_600_000);
   return [inicio, bruto > minimo ? bruto : minimo];
+}
+
+/**
+ * Dias (meia-noite local) cobertos por uma estadia, do dia de entrada ao de
+ * saida, inclusive. Sem data final, so o dia de entrada — a mesma regra que
+ * o banco usa para aceitar o dia de um extra no Hotel.
+ */
+export function diasDaEstadia(inicio: Date, fim: Date | null): Date[] {
+  const dia = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
+  const ultimo = fim ? new Date(fim.getFullYear(), fim.getMonth(), fim.getDate()) : new Date(dia);
+  const dias: Date[] = [];
+  while (dia <= ultimo) {
+    dias.push(new Date(dia));
+    dia.setDate(dia.getDate() + 1);
+  }
+  return dias;
 }
 
 /** Dois intervalos se cruzam? (fim exclusivo, como o `tstzrange` padrao) */
@@ -131,15 +156,50 @@ export function validarAgendamento(e: EntradaAgendamento): string | null {
     return 'Selecione ao menos um animal.';
   }
 
+  const servicos = servicosDe(e.servicos);
+  const erroServicos = erroCombinacao(servicos);
+  if (erroServicos) return erroServicos;
+
+  for (const { servico, valor } of e.servicos) {
+    if (valor == null) continue;
+    if (!servicoTemValor(servico)) {
+      return `${rotuloServico[servico]} não possui valor.`;
+    }
+    if (valor < 0) return 'O valor não pode ser negativo.';
+  }
+
   if (e.dataHoraFim && e.dataHoraFim < e.dataHoraInicio) {
     return 'A data/hora final nao pode ser anterior a inicial.';
   }
 
-  // Plano de estadia (rotina diaria) e obrigatorio apenas na Creche.
-  // O Hotel pode ter apenas o valor da estadia — ou nem isso.
-  if (exigePlanoEstadia(e.tipo)) {
+  // Extras num dia especifico: so no Hotel, dentro da estadia, e no maximo
+  // um de cada por dia (mesmas regras do banco).
+  const dias = diasDaEstadia(e.dataHoraInicio, e.dataHoraFim);
+  const vistos = new Set<string>();
+  for (const s of e.servicos) {
+    const rotulo = rotuloServico[s.servico];
+    const chave = chaveServico(s);
+    if (vistos.has(chave)) {
+      return s.data
+        ? `${rotulo} repetido no dia ${formatarData(s.data)}.`
+        : `${rotulo} repetido no agendamento.`;
+    }
+    vistos.add(chave);
+
+    if (!s.data) continue;
+    if (ePrincipal(s.servico) || !permiteDiaEspecifico(servicos)) {
+      return 'Dia específico só existe para extras em agendamentos de Hotel.';
+    }
+    if (s.data < dias[0] || s.data > dias[dias.length - 1]) {
+      return `${rotulo} em ${formatarData(s.data)} está fora do período da hospedagem.`;
+    }
+  }
+
+  // Plano de estadia (rotina diaria): obrigatorio com Creche, e so com ela.
+  // O Hotel usa o proprio periodo como entrada e saida.
+  if (exigePlanoEstadia(servicos)) {
     if (!e.planoEstadia) {
-      return `Plano de estadia e obrigatorio para ${rotuloTipo[e.tipo]}.`;
+      return 'Plano de estadia e obrigatorio para Creche.';
     }
     // A Creche nao tem secao de Periodo: estes horarios sao a UNICA fonte da
     // hora de cada ocorrencia. Sem eles tudo cai a meia-noite — e, pior, em
@@ -150,25 +210,18 @@ export function validarAgendamento(e: EntradaAgendamento): string | null {
     if (!e.planoEstadia.horarioSaida) {
       return 'Informe o horario de saida no plano de estadia.';
     }
+  } else if (e.planoEstadia) {
+    return 'Plano de estadia só existe em agendamentos com Creche.';
   }
 
-  // Visita nao registra estadia.
-  //
-  // Pergunta pelo tipo, e nao por `temEstadia`: Banho tambem nao tem estadia
-  // (nao registra pertences), mas guarda valor — e valor mora no plano. Usar
-  // o helper aqui rejeitaria todo Banho com valor preenchido.
-  if (e.tipo === 'visita') {
-    if (e.planoEstadia) {
-      return 'Agendamento do tipo Visita nao possui plano de estadia.';
-    }
-    if (e.pertencesDeixados) {
-      return 'Agendamento do tipo Visita nao possui pertences deixados.';
-    }
+  // Pertences so fazem sentido quando o cao passa o dia (ou dias) aqui.
+  if (e.pertencesDeixados && !temPertences(servicos)) {
+    return 'Pertences deixados só existem em agendamentos de Creche ou Hotel.';
   }
 
   // Recorrencia: exclusiva de Creche.
   if (e.recorrente) {
-    if (!permiteRecorrencia(e.tipo)) {
+    if (!permiteRecorrencia(servicos)) {
       return 'Recorrencia so e permitida para agendamentos de Creche.';
     }
     if (e.diasSemanaRecorrencia.length === 0) {
@@ -186,6 +239,29 @@ export function garantirValido(e: EntradaAgendamento): void {
   const erro = validarAgendamento(e);
   if (erro) throw new ErroValidacao(erro);
 }
+
+/**
+ * Na edicao, os servicos principais (Creche, Hotel, Visita) nao mudam: eles
+ * definem a estrutura do agendamento. Extras entram e saem livremente.
+ *
+ * Fica fora de `validarAgendamento` porque depende do estado ANTERIOR, que
+ * o formulario de criacao nao tem. Espelha a checagem da RPC
+ * `atualizar_agendamento`.
+ */
+export function erroMudancaServicos(
+  antes: ServicoAgendamento[],
+  depois: ServicoAgendamento[],
+): string | null {
+  const principais = (s: ServicoAgendamento[]) => s.filter(ePrincipal).sort().join();
+  if (principais(antes) !== principais(depois)) {
+    return ERRO_TROCA_PRINCIPAL;
+  }
+  return null;
+}
+
+export const ERRO_TROCA_PRINCIPAL =
+  'Creche, Hotel e Visita não podem ser alterados depois de criado o agendamento. ' +
+  'Cancele este e crie outro.';
 
 /**
  * Gera os pares (inicio, fim) de cada ocorrencia dentro do periodo.

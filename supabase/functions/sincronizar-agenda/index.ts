@@ -1,9 +1,12 @@
 /**
  * Espelha os agendamentos no Google Agenda.
  *
- * Disparada por Database Webhook a cada insert/update em `agendamentos`.
- * O app nao conhece esta funcao: as 12 ocorrencias de uma creche recorrente
- * nascem dentro do banco (via RPC), e o webhook as sincroniza sozinho.
+ * Disparada por triggers do Postgres: `enfileirar_sync_agenda` pede a
+ * chamada HTTP ao `pg_net` quando um agendamento muda ou quando seus caes
+ * sao gravados (o que toda RPC de escrita faz, inclusive ao mudar os
+ * servicos). O app nao conhece esta funcao: as 12 ocorrencias de uma creche
+ * recorrente nascem dentro do banco (via RPC), e os triggers as sincronizam
+ * sozinhos.
  *
  * Regras (decididas com o cliente):
  *   - cada ocorrencia vira um evento proprio (nao usamos RRULE, porque cada
@@ -30,7 +33,6 @@ const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 interface Agendamento {
   id: string;
-  tipo: 'visita' | 'hotel' | 'creche';
   data_hora_inicio: string;
   data_hora_fim: string | null;
   status: string;
@@ -51,11 +53,30 @@ interface DadosAnimal {
   tutores: { nome_completo: string; telefone: string | null } | null;
 }
 
-const rotuloTipo: Record<Agendamento['tipo'], string> = {
-  visita: 'Visita',
-  hotel: 'Hotel',
+type Servico =
+  | 'creche'
+  | 'hotel'
+  | 'banho'
+  | 'tosa_higienica'
+  | 'consulta'
+  | 'visita';
+
+// Mesma ordem e rotulos do app (`SERVICOS` / `rotuloServico`).
+const rotuloServico: Record<Servico, string> = {
   creche: 'Creche',
+  hotel: 'Hotel',
+  banho: 'Banho',
+  tosa_higienica: 'Tosa higiênica',
+  consulta: 'Consulta',
+  visita: 'Visita',
 };
+const ORDEM_SERVICOS = Object.keys(rotuloServico) as Servico[];
+
+/** Linha de `agendamento_servicos`. `data` = dia especifico ("2026-08-20"). */
+interface ServicoContratado {
+  servico: Servico;
+  data: string | null;
+}
 
 // ── Autenticacao Google (Service Account) ─────────────────────────────────
 //
@@ -186,6 +207,29 @@ async function buscarAnimais(agendamentoId: string): Promise<DadosAnimal[]> {
 }
 
 /**
+ * Servicos do agendamento, na ordem de exibicao do app: por servico, e
+ * dentro dele o "sem dia" primeiro e depois os dias.
+ *
+ * Lidos do banco, e nao do payload: o payload e a linha de `agendamentos`,
+ * e os servicos moram em outra tabela.
+ */
+async function buscarServicos(agendamentoId: string): Promise<ServicoContratado[]> {
+  const r = await pg(
+    `agendamento_servicos?agendamento_id=eq.${agendamentoId}&select=servico,data`,
+  );
+  const linhas = (await r.json()) as ServicoContratado[];
+  return linhas.sort(
+    (a, b) =>
+      ORDEM_SERVICOS.indexOf(a.servico) - ORDEM_SERVICOS.indexOf(b.servico) ||
+      // "2026-08-20" ordena como texto; sem dia ('') vem antes.
+      (a.data ?? '').localeCompare(b.data ?? ''),
+  );
+}
+
+/** "2026-08-20" -> "20/08". Corte de texto: sem `Date`, sem fuso. */
+const diaCurto = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
+/**
  * Le o id do evento DIRETO do banco, ignorando o payload.
  *
  * O `pg_net` e assincrono: varias chamadas podem sair com o mesmo retrato do
@@ -215,8 +259,29 @@ async function registrarSync(
 
 // ── Montagem do evento ────────────────────────────────────────────────────
 
-function montarEvento(a: Agendamento, animais: DadosAnimal[]) {
+function montarEvento(
+  a: Agendamento,
+  animais: DadosAnimal[],
+  servicos: ServicoContratado[],
+) {
   const nomes = animais.map((x) => x.nome).join(', ') || 'Animal';
+  // Titulo sem repetir: um Banho em dois dias da hospedagem aparece uma vez.
+  const titulo =
+    [...new Set(servicos.map((s) => s.servico))]
+      .map((s) => rotuloServico[s] ?? s)
+      .join(' + ') || 'Agendamento';
+  // Com mais de um servico, a descricao lista cada um — e e ali que o dia de
+  // um extra do Hotel aparece ("Banho — 20/08"), ja que o evento cobre a
+  // estadia inteira.
+  const listaServicos =
+    servicos.length > 1
+      ? servicos
+          .map((s) => {
+            const dia = s.data ? ` — ${diaCurto(s.data)}` : '';
+            return `- ${rotuloServico[s.servico] ?? s.servico}${dia}`;
+          })
+          .join('\n')
+      : null;
   // O tutor e o mesmo para todos os caes do agendamento.
   const tutor = animais[0]?.tutores ?? null;
 
@@ -228,6 +293,7 @@ function montarEvento(a: Agendamento, animais: DadosAnimal[]) {
   const descricao = [
     tutor ? `Tutor: ${tutor.nome_completo}` : null,
     tutor?.telefone ? `Telefone: ${tutor.telefone}` : null,
+    listaServicos ? `\nServiços:\n${listaServicos}` : null,
     animais.length > 1 ? `\nCães (${animais.length}): ${nomes}` : null,
     sobreCaes ? `\nSobre:\n${sobreCaes}` : null,
     a.observacoes ? `\nObservações: ${a.observacoes}` : null,
@@ -242,7 +308,7 @@ function montarEvento(a: Agendamento, animais: DadosAnimal[]) {
     new Date(new Date(inicio).getTime() + 60 * 60 * 1000).toISOString();
 
   return {
-    summary: `${nomes} — ${rotuloTipo[a.tipo]}`,
+    summary: `${nomes} — ${titulo}`,
     description: descricao || undefined,
     start: { dateTime: inicio, timeZone: FUSO },
     end: { dateTime: fim, timeZone: FUSO },
@@ -327,7 +393,8 @@ Deno.serve(async (req: Request) => {
       return Response.json({ ignorado: 'sem animais vinculados ainda' });
     }
 
-    const corpo = JSON.stringify(montarEvento(agendamento, animais));
+    const servicos = await buscarServicos(agendamento.id);
+    const corpo = JSON.stringify(montarEvento(agendamento, animais, servicos));
 
     // Se ja existe evento, faz PATCH — assim um webhook repetido nao
     // duplica o compromisso na agenda.
@@ -365,6 +432,7 @@ Deno.serve(async (req: Request) => {
     return Response.json({
       acao: eventoId ? 'atualizado' : 'criado',
       id: evento.id,
+      caes: animais.length,
     });
   } catch (erro) {
     const mensagem = erro instanceof Error ? erro.message : String(erro);

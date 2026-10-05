@@ -187,7 +187,7 @@ function Formulario({ animalId, original }: { animalId?: string; original?: Fich
   const txt = (v: string) => (v.trim() === '' ? null : v.trim());
 
   async function salvar() {
-    // O CPF/CNPJ e obrigatorio por decisao de negocio; a coluna aceita nulo.
+    // O CPF/CNPJ e obrigatorio por decisao de negocio (o banco tambem exige).
     if (!tNome.trim()) return avisar('Verifique os dados', 'Informe o nome do tutor.');
     if (!tCpf.trim()) return avisar('Verifique os dados', 'Informe o CPF/CNPJ do tutor.');
     if (!aNome.trim()) return avisar('Verifique os dados', 'Informe o nome do animal.');

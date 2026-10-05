@@ -23,6 +23,7 @@ import {
   contatoParaLinha,
   pertencesParaLinha,
   planoParaLinha,
+  servicosParaLinha,
   termoDeLinha,
   termoParaLinha,
   tutorDeLinha,
@@ -40,6 +41,7 @@ import type { EstadiasRepositorio } from './repositorio';
  * em `supabase/`:
  *   - `01_rls_policies.sql`      — RLS liberando `authenticated`
  *   - `02_fn_gerar_ocorrencias.sql` — RPC de recorrencia
+ *   - `08_servicos_agendamento.sql` — servicos e suas combinacoes
  */
 /**
  * Traduz violacoes de constraint do Postgres em mensagens que fazem sentido
@@ -50,9 +52,15 @@ import type { EstadiasRepositorio } from './repositorio';
  * veria algo como "conflicting key value violates exclusion constraint".
  */
 function traduzirErro(erro: unknown): Error {
-  const e = erro as { code?: string; message?: string } | null;
+  const e = erro as { code?: string; message?: string; hint?: string } | null;
   const codigo = e?.code ?? '';
   const texto = e?.message ?? String(erro);
+
+  // Regras de servicos (script 08): o banco ja manda a mensagem escrita para
+  // a equipe, e o `hint` marca que ela pode ser exibida como esta.
+  if (e?.hint === 'mensagem_para_usuario') {
+    return new ErroValidacao(texto);
+  }
 
   // 23P01 — exclusion_violation
   if (codigo === '23P01' || texto.includes('excl_animal_sem_sobreposicao')) {
@@ -87,12 +95,14 @@ function traduzirErro(erro: unknown): Error {
     if (texto.includes('chk_valor_nao_negativo')) {
       return new ErroValidacao('O valor não pode ser negativo.');
     }
-    // Trigger de Visita sem estadia usa este mesmo codigo.
-    if (texto.includes('Visita')) {
-      return new ErroValidacao(
-        'Agendamento do tipo Visita não possui plano de estadia nem pertences.',
-      );
+    if (texto.includes('chk_visita_sem_valor')) {
+      return new ErroValidacao('Visita não possui valor.');
     }
+  }
+
+  // 23505 — unique_violation
+  if (codigo === '23505' && texto.includes('agendamento_servico')) {
+    return new ErroValidacao('Serviço repetido no mesmo dia do agendamento.');
   }
 
   // 23502 — not_null_violation
@@ -112,7 +122,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
   // Os animais vem pela juncao `agendamento_animais`, aninhados dois niveis.
   private readonly selectAgendamento =
     '*, agendamento_animais(animal_id, animais(*, tutores(*))), ' +
-    'planos_estadia(*), pertences_deixados(*)';
+    'agendamento_servicos(servico, valor, data), planos_estadia(*), pertences_deixados(*)';
 
   // ── Tutores ──
 
@@ -232,11 +242,19 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     // `!inner` faz o filtro restringir o agendamento, e nao apenas o objeto
     // embutido. Com a juncao no meio, o `!inner` precisa valer nos dois
     // niveis, senao um agendamento sem o animal buscado ainda voltaria.
-    const select =
+    let select =
       filtro.tutorId || filtro.animalId
         ? '*, agendamento_animais!inner(animal_id, animais!inner(*, tutores(*))), ' +
-          'planos_estadia(*), pertences_deixados(*)'
+          'agendamento_servicos(servico, valor, data), planos_estadia(*), pertences_deixados(*)'
         : this.selectAgendamento;
+
+    // O filtro por servico usa um SEGUNDO embed da mesma tabela, so para
+    // filtrar. Filtrando o embed normal, o PostgREST tambem cortaria os
+    // outros servicos do agendamento: um "Creche + Banho" filtrado por Banho
+    // apareceria so como "Banho".
+    if (filtro.servico) {
+      select += ', filtro_servico:agendamento_servicos!inner(servico)';
+    }
 
     let q = this.db.from('agendamentos').select(select);
 
@@ -246,7 +264,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     if (filtro.tutorId) {
       q = q.eq('agendamento_animais.animais.tutor_id', filtro.tutorId);
     }
-    if (filtro.tipo) q = q.eq('tipo', filtro.tipo);
+    if (filtro.servico) q = q.eq('filtro_servico.servico', filtro.servico);
     if (filtro.status) q = q.eq('status', filtro.status);
     // Semantica de SOBREPOSICAO com o periodo (a mesma do repositorio em
     // memoria): um agendamento entra se ele *cruza* o intervalo, e nao
@@ -303,6 +321,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
           p_data_inicio: entrada.dataHoraInicio.toISOString(),
           p_data_fim: entrada.dataHoraFim!.toISOString(),
           p_dias_semana: entrada.diasSemanaRecorrencia,
+          p_servicos: servicosParaLinha(entrada.servicos),
           p_status: entrada.status,
           p_observacoes: entrada.observacoes,
           p_plano: entrada.planoEstadia
@@ -332,7 +351,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     // agendamento gravado sem nenhum cao. Aqui ou grava tudo, ou nada.
     const { data: id, error } = await this.db.rpc('criar_agendamento', {
       p_animal_ids: entrada.animalIds,
-      p_tipo: entrada.tipo,
+      p_servicos: servicosParaLinha(entrada.servicos),
       p_data_hora_inicio: entrada.dataHoraInicio.toISOString(),
       p_data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
       p_status: entrada.status,
@@ -357,7 +376,7 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     const { error } = await this.db.rpc('atualizar_agendamento', {
       p_id: id,
       p_animal_ids: entrada.animalIds,
-      p_tipo: entrada.tipo,
+      p_servicos: servicosParaLinha(entrada.servicos),
       p_data_hora_inicio: entrada.dataHoraInicio.toISOString(),
       p_data_hora_fim: entrada.dataHoraFim?.toISOString() ?? null,
       p_status: entrada.status,

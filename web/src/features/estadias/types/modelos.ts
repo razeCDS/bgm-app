@@ -1,12 +1,13 @@
-import { rotuloPorte } from './enums';
+import { paraInputData } from '../../../lib/datas-input';
+import { rotuloPorte, SERVICOS } from './enums';
 import type {
   DiaSemana,
   EspecieAnimal,
   FormaPagamento,
   PorteAnimal,
+  ServicoAgendamento,
   SexoAnimal,
   StatusAgendamento,
-  TipoAgendamento,
   TipoPlano,
 } from './enums';
 
@@ -101,9 +102,10 @@ export interface TermoConsentimento {
 }
 
 /**
- * Tabela `planos_estadia` (1:1 com `agendamentos`).
+ * Tabela `planos_estadia` (1:1 com `agendamentos`). So existe com Creche.
  *
- * Horarios sao `time` no Postgres — mantidos como "HH:mm" aqui.
+ * Horarios sao `time` no Postgres — mantidos como "HH:mm" aqui. O valor nao
+ * mora mais aqui: cada servico tem o seu, em `agendamento_servicos`.
  */
 export interface PlanoEstadia {
   id?: string;
@@ -113,19 +115,27 @@ export interface PlanoEstadia {
   horarioEntrada: string | null;
   horarioSaida: string | null;
   formaPagamento: FormaPagamento | null;
+}
+
+/** Tabela `agendamento_servicos` (1:N com `agendamentos`). */
+export interface ServicoContratado {
+  servico: ServicoAgendamento;
   /**
-   * Campo informativo — nao ha processamento de pagamento nesta fase.
+   * Valor livre, digitado pela equipe — nao ha tabela de precos. Nulo = nao
+   * informado. Campo informativo: nao ha processamento de pagamento.
    *
-   * SEMANTICA POR TIPO:
-   *  - Hotel: valor total da estadia inteira.
-   *  - Creche: valor da DIARIA.
-   *
-   * A diferenca importa porque o plano e 1:1 com o agendamento, e numa serie
-   * recorrente ele e copiado para cada ocorrencia. Se guardasse o valor do
-   * pacote, somar as ocorrencias devolveria o total multiplicado pelo numero
-   * de dias. Valor de pacote fechado ainda nao e modelado.
+   * Com Creche, e o valor POR DIA de cada servico: numa serie recorrente os
+   * servicos sao copiados em cada ocorrencia, entao um valor de pacote aqui
+   * faria qualquer soma devolver o total multiplicado pelo numero de dias.
+   * No Hotel, e o valor da estadia inteira.
    */
-  valorTotal: number | null;
+  valor: number | null;
+  /**
+   * Dia especifico dentro da estadia (meia-noite local), ou `null` = vale
+   * para o agendamento todo ("durante a estadia"). So extras de Hotel tem
+   * dia: na Creche cada dia ja e uma ocorrencia propria.
+   */
+  data: Date | null;
 }
 
 /** Tabela `pertences_deixados` (1:1 com `agendamentos`). */
@@ -155,7 +165,8 @@ export interface Agendamento {
    * (`excl_animal_sem_sobreposicao_juncao`) e continua valendo por animal.
    */
   animalIds: string[];
-  tipo: TipoAgendamento;
+  /** Ao menos um; na ordem de `SERVICOS`. */
+  servicos: ServicoContratado[];
   dataHoraInicio: Date;
   /** Opcional no banco: existe agendamento sem data final definida. */
   dataHoraFim: Date | null;
@@ -200,7 +211,8 @@ export interface FichaAnimal {
 export interface FiltroAgendamentos {
   animalId: string | null;
   tutorId: string | null;
-  tipo: TipoAgendamento | null;
+  /** Agendamentos que CONTEM o servico (podem ter outros junto). */
+  servico: ServicoAgendamento | null;
   status: StatusAgendamento | null;
   dataInicio: Date | null;
   dataFim: Date | null;
@@ -209,7 +221,7 @@ export interface FiltroAgendamentos {
 export const FILTRO_VAZIO: FiltroAgendamentos = {
   animalId: null,
   tutorId: null,
-  tipo: null,
+  servico: null,
   status: null,
   dataInicio: null,
   dataFim: null,
@@ -220,6 +232,50 @@ export const filtroEstaVazio = (f: FiltroAgendamentos) =>
 
 export const quantidadeFiltrosAtivos = (f: FiltroAgendamentos) =>
   Object.values(f).filter((v) => v != null).length;
+
+/**
+ * Os servicos distintos, sem valores nem dias: um Banho em dois dias do
+ * Hotel aparece uma vez so. E o que as regras de combinacao e os chips usam.
+ */
+export const servicosDe = (lista: ServicoContratado[]): ServicoAgendamento[] => [
+  ...new Set(lista.map((s) => s.servico)),
+];
+
+/**
+ * Identifica um servico contratado: o mesmo servico pode aparecer uma vez
+ * sem dia e uma vez por dia da estadia (a mesma regra do UNIQUE no banco).
+ */
+export const chaveServico = (s: { servico: ServicoAgendamento; data: Date | null }) =>
+  `${s.servico}|${paraInputData(s.data)}`;
+
+/**
+ * Coloca na ordem de exibicao, independente da ordem em que foram marcados:
+ * por servico, e dentro dele o "sem dia" primeiro e depois os dias.
+ */
+export const ordenarServicos = <T extends { servico: ServicoAgendamento; data: Date | null }>(
+  lista: T[],
+) =>
+  [...lista].sort(
+    (a, b) =>
+      SERVICOS.indexOf(a.servico) - SERVICOS.indexOf(b.servico) ||
+      // Sem dia vira 0 e fica antes de qualquer data real.
+      (a.data?.getTime() ?? 0) - (b.data?.getTime() ?? 0),
+  );
+
+/**
+ * Soma dos valores informados, ou `null` se nenhum foi informado (para nao
+ * exibir "R$ 0,00" num agendamento que simplesmente nao tem valor).
+ *
+ * Com Creche, e o valor de UM dia — quem exibe deve indicar "/dia".
+ */
+export function valorTotalDe(lista: ServicoContratado[]): number | null {
+  const valores = lista.map((s) => s.valor).filter((v): v is number => v != null);
+  return valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
+}
+
+/** O valor exibido e por dia (tem Creche) ou do agendamento inteiro? */
+export const valorEPorDia = (lista: ServicoContratado[]) =>
+  lista.some((s) => s.servico === 'creche');
 
 /** Linha resumida usada nos cards da aba Caes. */
 export function resumoAnimal(a: Animal): string {

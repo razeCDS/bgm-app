@@ -8,10 +8,10 @@ import { Janela } from '../../../components/janela';
 import { formatarData } from '../../../lib/formatadores';
 import { useAnimais, useFiltroAgendamentos, useTutores } from '../hooks';
 import {
+  rotuloServico,
   rotuloStatus,
-  rotuloTipo,
+  SERVICOS,
   STATUS_AGENDAMENTO,
-  TIPOS_AGENDAMENTO,
 } from '../types/enums';
 import {
   filtroEstaVazio,
@@ -21,7 +21,7 @@ import {
 
 /**
  * Painel de filtros combinaveis da aba Agendamentos.
- * Todos se acumulam: animal E tutor E tipo E status E periodo.
+ * Todos se acumulam: animal E tutor E servico E status E periodo.
  */
 export function PainelFiltros() {
   const { filtro, definir, limparTudo } = useFiltroAgendamentos();
@@ -37,11 +37,11 @@ export function PainelFiltros() {
       <div className="mx-auto max-w-2xl">
         <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
           <ChipMenu
-            rotulo="Tipo"
-            valor={filtro.tipo}
-            opcoes={TIPOS_AGENDAMENTO.map((t) => ({ chave: t, texto: rotuloTipo[t] }))}
+            rotulo="Serviço"
+            valor={filtro.servico}
+            opcoes={SERVICOS.map((s) => ({ chave: s, texto: rotuloServico[s] }))}
             aoSelecionar={(v) =>
-              definir({ ...filtro, tipo: v as FiltroAgendamentos['tipo'] })
+              definir({ ...filtro, servico: v as FiltroAgendamentos['servico'] })
             }
           />
           <ChipMenu

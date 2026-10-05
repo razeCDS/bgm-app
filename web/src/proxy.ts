@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { ROTA_INICIAL } from './lib/rotas';
+
 /**
  * Porta de entrada: roda no servidor ANTES de qualquer pagina.
  *
@@ -8,7 +10,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  *  1. Renovar o token da sessao (que vive num cookie) quando ele expira, e
  *     devolver o cookie novo na resposta.
  *  2. Redirecionar: sem sessao, tudo leva a /login; com sessao, /login leva
- *     para a home.
+ *     para a rota inicial (os agendamentos).
  *
  * Isto e conveniencia de navegacao, NAO seguranca. Quem protege os dados e
  * o RLS no banco: mesmo que alguem burlasse este redirecionamento, as
@@ -53,7 +55,7 @@ export async function proxy(request: NextRequest) {
     return redirecionar(request, '/login', resposta);
   }
   if (logado && naTelaDeLogin) {
-    return redirecionar(request, '/', resposta);
+    return redirecionar(request, ROTA_INICIAL, resposta);
   }
   return resposta;
 }

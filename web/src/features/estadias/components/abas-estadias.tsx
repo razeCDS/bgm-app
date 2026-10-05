@@ -6,6 +6,9 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { Cabecalho } from '../../../components/cabecalho';
+import { useDialogo } from '../../../components/dialogo';
+import { emMemoria } from '../../../lib/repositorios';
+import { useSessao } from '../../auth/store';
 
 const ABAS = [
   { href: '/estadias/agendamentos', texto: 'Agendamentos', icone: '📋' },
@@ -13,7 +16,11 @@ const ABAS = [
 ] as const;
 
 /**
- * Cabecalho do modulo Estadias com as abas.
+ * Cabecalho do app com as abas.
+ *
+ * E a primeira tela depois do login (nao ha mais tela de modulos), entao
+ * nao tem "voltar" — e e aqui que ficam o Sair e o aviso de modo
+ * demonstracao, que moravam na tela de modulos.
  *
  * No mobile a aba ativa era um `useState`; aqui cada aba e uma URL. O botao
  * voltar e o recarregar da pagina mantem a aba — antes, voltavam sempre
@@ -24,7 +31,15 @@ export function AbasEstadias({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <Cabecalho titulo="BGM Estadias" voltarPara="/" acoes={<BotaoAtualizar />}>
+      <Cabecalho
+        titulo="BGM Daycare"
+        acoes={
+          <>
+            <BotaoAtualizar />
+            <BotaoSair />
+          </>
+        }
+      >
         <nav className="mx-auto flex max-w-3xl" role="tablist">
           {ABAS.map((a) => {
             const ativa = caminho.startsWith(a.href);
@@ -46,6 +61,11 @@ export function AbasEstadias({ children }: { children: ReactNode }) {
           })}
         </nav>
       </Cabecalho>
+      {emMemoria ? (
+        <p className="bg-acento/35 px-4 py-2 text-center text-xs font-semibold text-primaria-escura">
+          Modo demonstração — dados de exemplo, nada é salvo de verdade.
+        </p>
+      ) : null}
       {children}
     </>
   );
@@ -81,6 +101,45 @@ function BotaoAtualizar() {
           strokeLinejoin="round"
         />
       </svg>
+    </button>
+  );
+}
+
+/**
+ * Pede confirmacao: fica colado no ↻, e um toque errado tiraria a pessoa da
+ * conta. A mensagem mostra o e-mail, que antes aparecia na saudacao da tela
+ * de modulos — num aparelho compartilhado, e o jeito de saber quem esta
+ * logado.
+ */
+function BotaoSair() {
+  const { usuario, sair } = useSessao();
+  const qc = useQueryClient();
+  const { confirmar } = useDialogo();
+
+  async function aoSair() {
+    const ok = await confirmar({
+      titulo: 'Sair',
+      mensagem: usuario?.email
+        ? `Sair da conta ${usuario.email}?`
+        : 'Sair da conta?',
+      textoConfirmar: 'Sair',
+    });
+    if (!ok) return;
+
+    await sair();
+    // O cache guarda dados de clientes. Num aparelho compartilhado, o
+    // proximo a entrar nao pode ver o que ficou da sessao anterior.
+    qc.clear();
+    // O redirecionamento para /login e feito pelo GuardSessao.
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void aoSair()}
+      className="h-10 rounded-full px-3 text-sm font-semibold hover:bg-white/10"
+    >
+      Sair
     </button>
   );
 }

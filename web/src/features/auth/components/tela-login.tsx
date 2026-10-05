@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 
 import { Botao } from '../../../components/botoes';
 import { Rotulo } from '../../../components/campos';
+import { ROTA_INICIAL } from '../../../lib/rotas';
 import { ErroAutenticacao } from '../repositorio';
 import { useSessao } from '../store';
 
@@ -30,8 +31,9 @@ export function TelaLogin() {
     setCarregando(true);
     try {
       await entrar(email.trim(), senha);
-      // A sessao ja esta no cookie: o proxy deixa passar.
-      router.replace('/');
+      // A sessao ja esta no cookie: o proxy deixa passar. Vai direto para a
+      // rota inicial, sem o salto extra pelo redirecionamento de `/`.
+      router.replace(ROTA_INICIAL);
     } catch (e) {
       setErro(
         e instanceof ErroAutenticacao

@@ -17,8 +17,12 @@ Não é voltado para clientes finais.
 
 Módulos:
 - **BGM Estadias** — o único implementado: cadastro de clientes (tutor + cães +
-  ficha completa) e agendamentos (Creche, Hotel, Visita, Banho).
-- **BGM Banho/Tosa** — card "em breve" na tela inicial; não existe ainda.
+  ficha completa) e agendamentos (Creche, Hotel, Banho, Tosa higiênica,
+  Consulta, Visita).
+- **BGM Banho/Tosa** — planejado; não existe ainda. A tela de **Módulos** foi
+  removida em 05/10/2026: depois do login o app abre direto nos agendamentos.
+  Quando houver um segundo módulo, a navegação entre eles volta (a tela antiga
+  está no histórico do git, `features/inicio/tela-modulos.tsx`).
 
 A agenda por data **não existe dentro do app**: cada agendamento é espelhado
 automaticamente no **Google Agenda**, que é a visão de calendário da equipe.
@@ -86,9 +90,9 @@ bgm-app/
         layout.tsx, providers.tsx, globals.css, manifest.ts, icon.png, apple-icon.png
         login/page.tsx
         (app)/         grupo de rotas logadas (layout com GuardSessao)
-          page.tsx                         tela inicial (módulos)
+          page.tsx                         redireciona p/ ROTA_INICIAL (/estadias/agendamentos)
           estadias/page.tsx                redireciona p/ /estadias/agendamentos
-          estadias/(abas)/layout.tsx       cabeçalho + abas
+          estadias/(abas)/layout.tsx       cabeçalho "BGM Daycare" (↻, Sair) + abas
           estadias/(abas)/agendamentos/    lista de agendamentos
           estadias/(abas)/clientes/        lista de cães
           estadias/agendamento/novo|[id]/  formulário de agendamento
@@ -96,7 +100,6 @@ bgm-app/
       components/      botoes, campos, cabecalho, chips, dialogo, janela, estados, spinner
       features/
         auth/          repositorio.ts (fake + Supabase), store.ts (Zustand), components/
-        inicio/        tela-modulos.tsx
         estadias/
           types/       enums.ts, modelos.ts, entrada-agendamento.ts (regras puras)
           data/        repositorio.ts (interface), -fake.ts, -supabase.ts, mapeadores.ts
@@ -104,7 +107,7 @@ bgm-app/
           components/  telas do módulo
           __tests__/   regras.test.ts
       lib/             supabase.ts, repositorios.ts, formatadores.ts, datas-input.ts,
-                       navegacao.ts, erros.ts, __tests__/
+                       navegacao.ts, rotas.ts (ROTA_INICIAL), erros.ts, __tests__/
 ```
 
 ## 5. Arquitetura do app web
@@ -150,7 +153,9 @@ types/ (regras puras, testadas)  →  data/ (repositórios)  →  hooks/ (TanSta
   invalida `agendamentos`, `agendamento` e `serie`).
 - Zustand guarda só estado de UI: texto da busca de clientes e filtros da
   lista de agendamentos (serviço, status, animal, tutor, período).
-- Ao **Sair**, o cache do TanStack é limpo (aparelho pode ser compartilhado).
+- **Sair** fica no cabeçalho, ao lado do ↻, e pede confirmação mostrando o
+  e-mail da conta. Ao sair, o cache do TanStack é limpo (aparelho pode ser
+  compartilhado).
 
 ### 5.3 Autenticação
 
@@ -158,7 +163,8 @@ types/ (regras puras, testadas)  →  data/ (repositórios)  →  hooks/ (TanSta
   fica num **cookie**, que viaja em toda requisição.
 - `src/proxy.ts` (Next 16 renomeou `middleware` → `proxy`): renova o token
   com `getClaims()` (valida assinatura — nunca usar `getSession` no servidor),
-  e redireciona: sem sessão → `/login`; com sessão em `/login` → `/`. Em modo
+  e redireciona: sem sessão → `/login`; com sessão em `/login` →
+  `ROTA_INICIAL` (`lib/rotas.ts`, sem hooks para o proxy poder importar). Em modo
   memória não faz nada. Matcher exclui estáticos, ícones e o manifesto.
 - `GuardSessao` (layout de `(app)`) cobre o que acontece com a página aberta:
   sair, token expirado, modo memória. **A tela de login não redireciona
@@ -170,7 +176,8 @@ types/ (regras puras, testadas)  →  data/ (repositórios)  →  hooks/ (TanSta
 
 ### 5.4 Telas e componentes
 
-- Rotas: `/login`, `/`, `/estadias/agendamentos`, `/estadias/clientes`,
+- Rotas: `/login`, `/` (só redireciona; o `start_url` do PWA continua `/`),
+  `/estadias/agendamentos` (primeira tela depois do login), `/estadias/clientes`,
   `/estadias/agendamento/novo`, `/estadias/agendamento/[id]`,
   `/estadias/animal/novo`, `/estadias/animal/[id]`,
   `/estadias/animal/[id]/editar`. Páginas com `[id]` recebem `params` como
@@ -438,6 +445,9 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   enxergar a sessão.
 - **Sem service worker** (dados sempre frescos).
 - **Inputs nativos** de data/hora/seleção (seletor do próprio celular).
+- **Sem tela de Módulos** (05/10/2026): com um módulo só, ela era um toque a
+  mais em todo acesso. O cabeçalho de Estadias virou o do app ("BGM
+  Daycare") e recebeu o Sair e o aviso de modo demonstração.
 - **Serviços no lugar do tipo** (04/10/2026): o cliente combina serviços
   (creche + banho, hotel + tosa); com tipo único isso exigiria dois
   agendamentos do mesmo cão no mesmo período, que a dupla reserva barra.

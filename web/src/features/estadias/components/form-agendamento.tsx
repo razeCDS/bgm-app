@@ -484,6 +484,11 @@ function Formulario({
             rotuloDe={(v) => rotuloStatus[v]}
             aoSelecionar={(v) => v && setStatus(v)}
           />
+          {/* Quem avanca o status e o job do banco (script 11). */}
+          <Dica>
+            Muda sozinho: Em andamento no horário de início e Concluído no de
+            término. Sem data final, a conclusão é manual.
+          </Dica>
         </Secao>
 
         <Secao titulo="Serviços *">

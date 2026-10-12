@@ -428,7 +428,7 @@ describe('Edicao de servicos', () => {
       animalIds: [animal.id],
       dataHoraInicio: new Date(2026, 8, 10, 9),
       dataHoraFim: new Date(2026, 8, 14, 18),
-      status: 'confirmado' as const,
+      status: 'solicitado' as const,
     };
     const [criado] = await repo.criarAgendamento(base({ ...dados, servicos: so('hotel') }));
 
@@ -480,7 +480,7 @@ describe('Recorrencia', () => {
       servicos: so('creche'),
       dataHoraInicio: new Date(2026, 7, 3, 8),
       dataHoraFim: new Date(2026, 7, 28, 18),
-      status: 'confirmado',
+      status: 'solicitado',
       recorrente: true,
       diasSemanaRecorrencia: [1, 3, 5] as DiaSemana[],
       planoEstadia: planoCreche,
@@ -527,7 +527,7 @@ describe('Recorrencia', () => {
         servicos: so('creche'),
         dataHoraInicio: new Date(2026, 7, 3, 8),
         dataHoraFim: new Date(2026, 7, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
         recorrente: true,
         diasSemanaRecorrencia: [1],
         planoEstadia: planoCreche,
@@ -544,7 +544,7 @@ describe('Recorrencia', () => {
     await repo.cancelarAgendamento(criados[0].id);
     const lista = await repo.listarAgendamentos(FILTRO_VAZIO);
     expect(lista.filter((a) => a.status === 'cancelado')).toHaveLength(1);
-    expect(lista.filter((a) => a.status === 'confirmado')).toHaveLength(1);
+    expect(lista.filter((a) => a.status === 'solicitado')).toHaveLength(1);
   });
 });
 
@@ -651,7 +651,7 @@ describe('Dupla reserva do mesmo animal', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -678,7 +678,7 @@ describe('Dupla reserva do mesmo animal', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
     await repo.cancelarAgendamento(criado.id);
@@ -705,7 +705,7 @@ describe('Dupla reserva do mesmo animal', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -715,7 +715,7 @@ describe('Dupla reserva do mesmo animal', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 11, 9),
         dataHoraFim: new Date(2026, 8, 15, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     });
     expect(atualizado.dataHoraInicio.getDate()).toBe(11);
@@ -731,7 +731,7 @@ describe('Dupla reserva do mesmo animal', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 7, 12, 9),
         dataHoraFim: new Date(2026, 7, 12, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
     const antes = (await repo.listarAgendamentos(FILTRO_VAZIO)).length;
@@ -743,7 +743,7 @@ describe('Dupla reserva do mesmo animal', () => {
           servicos: so('creche'),
           dataHoraInicio: new Date(2026, 7, 3, 9),
           dataHoraFim: new Date(2026, 7, 28, 18),
-          status: 'confirmado',
+          status: 'solicitado',
           recorrente: true,
           diasSemanaRecorrencia: [3], // quartas
           planoEstadia: planoCreche,
@@ -796,7 +796,7 @@ describe('Varios caes no mesmo agendamento', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -815,7 +815,7 @@ describe('Varios caes no mesmo agendamento', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -843,7 +843,7 @@ describe('Varios caes no mesmo agendamento', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -853,7 +853,7 @@ describe('Varios caes no mesmo agendamento', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
     expect(novos).toHaveLength(1);
@@ -868,7 +868,7 @@ describe('Varios caes no mesmo agendamento', () => {
         servicos: so('hotel'),
         dataHoraInicio: new Date(2026, 8, 10, 9),
         dataHoraFim: new Date(2026, 8, 14, 18),
-        status: 'confirmado',
+        status: 'solicitado',
       }),
     );
 
@@ -926,7 +926,7 @@ describe('Ocorrencias de uma serie', () => {
         servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '08:00'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 4), '18:00'),
-        status: 'confirmado',
+        status: 'solicitado',
         recorrente: true,
         diasSemanaRecorrencia: [1],
         planoEstadia: {
@@ -985,7 +985,7 @@ describe('Ocorrencias de uma serie', () => {
         servicos: so('creche'),
         dataHoraInicio: comHorario(inicio, '08:00'),
         dataHoraFim: comHorario(fimDaJanela(inicio, 5), '18:00'),
-        status: 'confirmado',
+        status: 'solicitado',
         recorrente: true,
         diasSemanaRecorrencia: [1],
         planoEstadia: {
@@ -1006,7 +1006,7 @@ describe('Ocorrencias de uma serie', () => {
 
     const serie = await repo.listarOcorrencias(serieId);
     const passadas = serie.filter((o) => o.dataHoraInicio.getDate() <= 17);
-    expect(passadas.every((o) => o.status === 'confirmado')).toBe(true);
+    expect(passadas.every((o) => o.status === 'solicitado')).toBe(true);
   });
 
   it('cancelar a serie duas vezes nao recancela nada', async () => {

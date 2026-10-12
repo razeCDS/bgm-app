@@ -17,7 +17,6 @@ export type ServicoAgendamento =
   | 'visita';
 export type StatusAgendamento =
   | 'solicitado'
-  | 'confirmado'
   | 'em_andamento'
   | 'concluido'
   | 'cancelado';
@@ -38,7 +37,6 @@ export const SERVICOS: ServicoAgendamento[] = [
 ];
 export const STATUS_AGENDAMENTO: StatusAgendamento[] = [
   'solicitado',
-  'confirmado',
   'em_andamento',
   'concluido',
   'cancelado',
@@ -81,7 +79,6 @@ export const rotuloServicoCompleto: Record<ServicoAgendamento, string> = {
 
 export const rotuloStatus: Record<StatusAgendamento, string> = {
   solicitado: 'Solicitado',
-  confirmado: 'Confirmado',
   em_andamento: 'Em andamento',
   concluido: 'Concluído',
   cancelado: 'Cancelado',

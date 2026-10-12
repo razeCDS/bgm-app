@@ -1,4 +1,4 @@
-# BGM Daycare — contexto completo do projeto
+# BGM Daycare — contexto completo do projeto 
 
 > **Para quem está lendo (outro chat/assistente):** este documento resume tudo o
 > que já foi construído e decidido até **04/10/2026**. Trate-o como ponto de

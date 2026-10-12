@@ -29,6 +29,7 @@ problema que resolve.
 | `08_servicos_agendamento.sql` | Troca o tipo único do agendamento por uma lista de serviços, cada um com seu valor |
 | `09_servicos_por_dia.sql` | Extras do Hotel num dia específico da estadia |
 | `10_remove_status_confirmado.sql` | Tira de uso o status "confirmado" |
+| `11_status_automatico.sql` | Job do pg_cron (a cada 5 min) que avança o status pelo horário |
 
 ### Edge Function `sincronizar-agenda`
 
@@ -80,6 +81,9 @@ todos os dados — por isso o cadastro público precisa ficar desligado.
   cancela só as ocorrências futuras (as passadas são registro de frequência).
 - **Cancelar** muda o status para `cancelado`; o registro nunca é apagado. No
   Google Agenda, o evento é removido.
+- **Status automático**: um job do banco (pg_cron, a cada 5 minutos) passa o
+  agendamento para **em andamento** no horário de início e para
+  **concluído** no de término. Sem data final, a conclusão é manual.
 - **Um cão não pode ter dois agendamentos no mesmo período** — barrado no
   banco por constraint, com mensagem amigável no app.
 - **Termo de consentimento** é informativo: seus itens são conferência manual

@@ -30,8 +30,8 @@ automaticamente no **Google Agenda**, que é a visão de calendário da equipe.
 ## 2. Estado atual
 
 - **App web em Next.js (PWA)** em `web/`, funcionando e **testado com o banco
-  real e o Google Agenda** pelo usuário. Ainda **não foi publicado** (falta o
-  deploy na Vercel).
+  real e o Google Agenda** pelo usuário. **Publicado na Vercel** (out/2026)
+  a partir da `main`; a `develop` chega à `main` por PR no GitHub.
 - O app anterior em **Expo/React Native** (`mobile/`) foi **removido** do
   repositório depois da validação do web (continua no histórico do git).
 - Últimos commits em `develop` (já enviados ao GitHub):
@@ -48,8 +48,11 @@ automaticamente no **Google Agenda**, que é a visão de calendário da equipe.
   scripts `08` e `09` foram aplicados pelo usuário no SQL Editor (por isso
   **não** aparecem na lista de migrations do MCP) e a Edge Function
   `sincronizar-agenda` está na **v9**, igual ao repositório.
-- Verificação no momento: ESLint sem erros, `tsc` limpo, **59 testes**
-  passando, build de produção ok.
+- **12/10/2026:** status "confirmado" removido (script `10`) e status
+  automático por pg_cron (script `11`) — seção 8. Os dois scripts são
+  aplicados pelo usuário no SQL Editor.
+- Verificação no momento: ESLint sem erros, `tsc` limpo, **67 testes**
+  passando.
 
 ## 3. Stack
 
@@ -300,6 +303,7 @@ felina) · `sexo_animal` (femea, macho).
 | `gravar_servicos_agendamento(...)` / `gravar_relacionados_agendamento(...)` | Auxiliares internas (serviços; plano/pertences). |
 | `enfileirar_sync_agenda(id)` | Enfileira a chamada HTTP para a Edge Function (via `pg_net`). **Sem EXECUTE para anon/authenticated** (script 07). |
 | `periodo_agendamento(inicio, fim)` | `tstzrange` usado pela exclusão. |
+| `avancar_status_agendamentos()` | Chamada pelo **pg_cron a cada 5 min** (job `avancar-status-agendamentos`, script 11): solicitado → em_andamento no início; em_andamento → concluído no término (sem data final, nunca). **Sem EXECUTE para anon/authenticated.** Outro job, `limpar-historico-cron`, guarda 7 dias de `cron.job_run_details`. |
 
 Antes das RPCs atômicas o app gravava em 4 chamadas separadas e uma falha na
 junção deixava agendamento **órfão** — por isso elas existem.
@@ -308,7 +312,10 @@ junção deixava agendamento **órfão** — por isso elas existem.
 
 - `trg_sync_agenda` — `AFTER UPDATE OF data_hora_inicio, data_hora_fim,
   status, observacoes` em `agendamentos` (não dispara em INSERT de
-  propósito; `tipo` saiu da lista no script 08).
+  propósito; `tipo` saiu da lista no script 08). Desde o script 11 tem um
+  `WHEN`: só sincroniza se datas ou observações mudaram de fato, ou se o
+  status entrou/saiu de `cancelado` — o evento não mostra o status, e sem
+  isso cada avanço do job chamaria o Google à toa.
 - `trg_sync_agenda_animais_ins` / `_del` — **FOR EACH STATEMENT** com
   transition tables em `agendamento_animais` (um sync por agendamento, não
   por linha — antes gerava eventos duplicados).
@@ -338,7 +345,8 @@ junção deixava agendamento **órfão** — por isso elas existem.
 no cabeçalho) · 04 regras de negócio no banco · 05 vários animais por
 agendamento · 06 RPCs atômicas · 07 revoke do `enfileirar_sync_agenda` · 08
 serviços no lugar do tipo (substitui as RPCs do 02 e do 06) · 09 extras do
-Hotel num dia específico.
+Hotel num dia específico · 10 fim do status "confirmado" · 11 status
+automático (pg_cron).
 Cada script explica no cabeçalho o problema que resolve. Mudanças no banco
 foram aplicadas também como migrations pelo MCP do Supabase.
 
@@ -429,6 +437,12 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   o CNPJ passou a aceitar letras em jul/2026.
 - **Status** possíveis: solicitado, em andamento, concluído, cancelado. O
   "confirmado" saiu em out/2026: a equipe não usava esse passo.
+- **Status automático** (job do banco, a cada 5 min): vira **em andamento**
+  no horário de início e **concluído** no de término. Sem data final (Hotel
+  em aberto, Creche sem horário de saída), a conclusão é manual. Cancelado e
+  concluído nunca mudam; voltar à mão para "solicitado" um agendamento já
+  iniciado dura até a próxima execução. O modo demonstração não simula o
+  job.
 
 ## 9. Decisões e o porquê (histórico resumido)
 
@@ -452,6 +466,10 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
 - **Sem tela de Módulos** (05/10/2026): com um módulo só, ela era um toque a
   mais em todo acesso. O cabeçalho de Estadias virou o do app ("BGM
   Daycare") e recebeu o Sair e o aviso de modo demonstração.
+- **Status automático no banco, não no app** (12/10/2026): o pg_cron roda
+  com o app fechado, não custa nada e não tira chave do banco. O cron da
+  Vercel gratuito só roda uma vez por dia, e uma rota do app precisaria da
+  `service_role` no servidor.
 - **Serviços no lugar do tipo** (04/10/2026): o cliente combina serviços
   (creche + banho, hotel + tosa); com tipo único isso exigiria dois
   agendamentos do mesmo cão no mesmo período, que a dupla reserva barra.
@@ -516,16 +534,17 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
   agendamento completo → cabem ~580 mil agendamentos. `net._http_response`
   se limpa sozinha (~6 h).
 - O projeto **pausa após ~7 dias sem uso** (já aconteceu uma vez); reativa-se
-  no painel. Com o app em uso diário, não deve ocorrer.
+  no painel. Com o app em uso diário, não deve ocorrer. Pausado, o job de
+  status também para; ao reativar, a primeira execução põe tudo em dia.
+- Jobs do pg_cron e o histórico de execuções: painel → Integrations → Cron.
 
 ## 14. Pendências
 
 Prioridade alta (antes de liberar para as donas):
 1. **Painel do Supabase → Auth**: desligar "Allow new users to sign up" e
    ligar "Leaked password protection".
-2. **Deploy na Vercel**: importar o repo, Root Directory `web`, cadastrar as
-   duas variáveis `NEXT_PUBLIC_*`. HTTPS é obrigatório para o PWA (a Vercel
-   já fornece).
+2. Aplicar no SQL Editor os scripts `10` (depois de publicar o app sem o
+   "confirmado") e `11`.
 3. Instalar nos celulares ("Adicionar à tela de início").
 4. Apontar `GOOGLE_CALENDAR_ID` para o calendário definitivo (hoje é o de
    testes do usuário), cadastrando sem quebra de linha no fim; compartilhar o

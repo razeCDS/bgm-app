@@ -12,7 +12,6 @@ import {
  */
 const paletaStatus: Record<StatusAgendamento, string> = {
   solicitado: 'bg-neutra-clara text-texto-suave',
-  confirmado: 'bg-primaria/12 text-primaria-escura',
   em_andamento: 'bg-acento text-primaria-escura',
   concluido: 'bg-neutra/35 text-texto-escuro',
   cancelado: 'bg-erro/10 text-erro',

@@ -28,6 +28,7 @@ problema que resolve.
 | `07_revoke_enfileirar_sync.sql` | Fecha a RPC pública que disparava o sync |
 | `08_servicos_agendamento.sql` | Troca o tipo único do agendamento por uma lista de serviços, cada um com seu valor |
 | `09_servicos_por_dia.sql` | Extras do Hotel num dia específico da estadia |
+| `10_remove_status_confirmado.sql` | Tira de uso o status "confirmado" |
 
 ### Edge Function `sincronizar-agenda`
 

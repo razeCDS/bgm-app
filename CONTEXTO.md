@@ -259,7 +259,8 @@ coluna `tipo` e o `planos_estadia.valor_total` saíram com o script 08.)
 
 `servico_agendamento` (creche, hotel, banho, tosa_higienica, consulta,
 visita — substitui o antigo `tipo_agendamento`) · `status_agendamento`
-(solicitado, confirmado, em_andamento, concluido, cancelado) · `tipo_plano`
+(solicitado, em_andamento, concluido, cancelado; `confirmado` ainda existe no
+tipo, mas o CHECK do script 10 o recusa) · `tipo_plano`
 (diaria, semanal, mensal, anual) · `forma_pagamento` (pix, dinheiro) ·
 `porte_animal` (mini, pequeno, medio, grande) · `especie_animal` (canina,
 felina) · `sexo_animal` (femea, macho).
@@ -276,6 +277,9 @@ felina) · `sexo_animal` (femea, macho).
   exige dias e data final, dias da semana em 0–6, e ocorrência (tem
   `agendamento_recorrencia_id`) não é marcada como regra. ("Recorrência só
   em Creche" saiu do CHECK e foi para a RPC de recorrência.)
+- `chk_status_sem_confirmado` — o status `confirmado` saiu de uso (script 10).
+  O Postgres não remove valor de enum, e recriar o tipo arrastaria as RPCs
+  e a exclusão de sobreposição.
 - CHECKs: `valor ≥ 0` e Visita sem valor (em `agendamento_servicos`),
   `total_dias > 0`, `ordem > 0`, `idade` numérica.
 - `validar_servicos_agendamento` — **constraint trigger adiado** (roda no
@@ -423,8 +427,8 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
 - **Dias da semana**: 0 = domingo (Postgres `dow` = `Date.getDay()`).
 - **CPF/CNPJ** obrigatório (formulário e banco). O campo usa teclado comum:
   o CNPJ passou a aceitar letras em jul/2026.
-- **Status** possíveis: solicitado, confirmado, em andamento, concluído,
-  cancelado.
+- **Status** possíveis: solicitado, em andamento, concluído, cancelado. O
+  "confirmado" saiu em out/2026: a equipe não usava esse passo.
 
 ## 9. Decisões e o porquê (histórico resumido)
 

@@ -113,6 +113,17 @@ function traduzirErro(erro: unknown): Error {
   return erro instanceof Error ? erro : new Error(texto);
 }
 
+/**
+ * Valor digitado pelo usuario, pronto para entrar num filtro `or(...)`.
+ *
+ * Virgula, ponto, dois-pontos e parenteses sao sintaxe do PostgREST: sem as
+ * aspas, buscar "Rex, Thor" quebraria a consulta — ou mudaria o filtro.
+ * Dentro das aspas, so `"` e `\` precisam de escape.
+ */
+function valorDeFiltro(texto: string): string {
+  return `"${texto.replace(/["\\]/g, '\\$&')}"`;
+}
+
 export class RepositorioSupabase implements EstadiasRepositorio {
   private get db() {
     return exigirSupabase();
@@ -150,7 +161,10 @@ export class RepositorioSupabase implements EstadiasRepositorio {
   async listarAnimais(busca?: string): Promise<Animal[]> {
     let q = this.db.from('animais').select('*, tutores(*)');
     const termo = (busca ?? '').trim();
-    if (termo) q = q.or(`nome.ilike.%${termo}%,raca.ilike.%${termo}%`);
+    if (termo) {
+      const padrao = valorDeFiltro(`%${termo}%`);
+      q = q.or(`nome.ilike.${padrao},raca.ilike.${padrao}`);
+    }
     const { data, error } = await q.order('nome');
     if (error) throw traduzirErro(error);
     return (data ?? []).map(animalDeLinha);

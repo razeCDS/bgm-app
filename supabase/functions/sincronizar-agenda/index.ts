@@ -18,6 +18,9 @@
  *   - falha de sync NUNCA invalida o agendamento: registramos o erro em
  *     `google_sync_erro` e devolvemos 200.
  *
+ * Seguranca: so aceita a service_role (o trigger) e, do payload, usa so o
+ * id — todo o resto e lido do banco. Ver `chamadaDoBanco`.
+ *
  * ARQUIVO UNICO de proposito: o editor do painel do Supabase e single-file,
  * e imports relativos entre arquivos quebram no deploy se algum ficar para
  * tras. Para ~250 linhas, nao vale o risco.
@@ -40,12 +43,16 @@ interface Agendamento {
   google_calendar_event_id: string | null;
 }
 
+/**
+ * Corpo enviado por `enfileirar_sync_agenda`. Dele so interessa o id: o
+ * `record` e um retrato tirado na hora do enfileiramento.
+ */
 interface Payload {
-  type: 'INSERT' | 'UPDATE' | 'DELETE';
-  table: string;
-  record: Agendamento | null;
-  old_record: Agendamento | null;
+  record?: { id?: unknown } | null;
+  old_record?: { id?: unknown } | null;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface DadosAnimal {
   nome: string;
@@ -230,19 +237,21 @@ async function buscarServicos(agendamentoId: string): Promise<ServicoContratado[
 const diaCurto = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 /**
- * Le o id do evento DIRETO do banco, ignorando o payload.
+ * Le o agendamento DIRETO do banco, ignorando o retrato do payload.
  *
- * O `pg_net` e assincrono: varias chamadas podem sair com o mesmo retrato do
- * agendamento e todas acharem que nao ha evento ainda — foi o que gerou
- * eventos duplicados no Google. Lendo aqui, quem chega depois faz PATCH em
- * vez de criar outro.
+ * O `pg_net` e assincrono: varias chamadas podem sair com o mesmo retrato e
+ * todas acharem que nao ha evento ainda — foi o que gerou eventos duplicados
+ * no Google. Um retrato antigo tambem pode chegar depois de um novo e
+ * deixar o evento desatualizado. Lendo aqui, vale sempre o estado atual, e
+ * quem chega depois faz PATCH em vez de criar outro evento.
  */
-async function eventoAtual(agendamentoId: string): Promise<string | null> {
+async function buscarAgendamento(id: string): Promise<Agendamento | null> {
   const r = await pg(
-    `agendamentos?id=eq.${agendamentoId}&select=google_calendar_event_id`,
+    `agendamentos?id=eq.${id}` +
+      '&select=id,data_hora_inicio,data_hora_fim,status,observacoes,google_calendar_event_id',
   );
-  const linhas = (await r.json()) as { google_calendar_event_id: string | null }[];
-  return linhas[0]?.google_calendar_event_id ?? null;
+  const linhas = (await r.json()) as Agendamento[];
+  return linhas[0] ?? null;
 }
 
 async function registrarSync(
@@ -338,17 +347,50 @@ function chamarCalendar(
   );
 }
 
+// ── Quem pode chamar ──────────────────────────────────────────────────────
+
+/**
+ * So o banco chama esta funcao, e o trigger manda a service_role.
+ *
+ * O gateway (`verify_jwt`) ja validou a assinatura do token, mas aceita
+ * QUALQUER token do projeto: o de um usuario logado ou a chave anon antiga,
+ * que nao e segredo. Sem esta checagem, quem tivesse um deles poderia criar
+ * ou apagar eventos no Google. Como a assinatura ja foi conferida, basta ler
+ * o papel no corpo do token.
+ */
+function chamadaDoBanco(req: Request): boolean {
+  const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+  const partes = token.split('.');
+  if (partes.length !== 3) return false;
+  try {
+    const corpo = JSON.parse(atob(partes[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return corpo?.role === 'service_role';
+  } catch {
+    return false;
+  }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
+  if (!chamadaDoBanco(req)) {
+    return Response.json({ erro: 'Acesso negado.' }, { status: 403 });
+  }
+
   let agendamento: Agendamento | null = null;
 
   try {
     const payload = (await req.json()) as Payload;
-    agendamento = payload.record ?? payload.old_record;
+    const id = payload.record?.id ?? payload.old_record?.id;
 
+    // O id vai para a URL do PostgREST: so passa se for um uuid.
+    if (typeof id !== 'string' || !UUID.test(id)) {
+      return Response.json({ ignorado: 'sem id valido no payload' });
+    }
+
+    agendamento = await buscarAgendamento(id);
     if (!agendamento) {
-      return Response.json({ ignorado: 'sem registro no payload' });
+      return Response.json({ ignorado: 'agendamento nao existe' });
     }
 
     const contaServico = Deno.env.get('GOOGLE_SERVICE_ACCOUNT');
@@ -363,7 +405,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const token = await obterAccessToken(contaServico);
-    const eventoId = await eventoAtual(agendamento.id);
+    const eventoId = agendamento.google_calendar_event_id;
 
     // ── Cancelado: apaga do Google ──
     if (agendamento.status === 'cancelado') {

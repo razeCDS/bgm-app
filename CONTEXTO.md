@@ -51,6 +51,10 @@ automaticamente no **Google Agenda**, que é a visão de calendário da equipe.
 - **12/10/2026:** status "confirmado" removido (script `10`) e status
   automático por pg_cron (script `11`) — seção 8. Os dois scripts são
   aplicados pelo usuário no SQL Editor.
+- **12/10/2026 — correções de segurança** (seção 10): `sincronizar-agenda`
+  só aceita a service_role e lê o agendamento do banco; cabeçalhos de
+  segurança no `next.config.ts`; script `12` tira as funções internas da
+  API; busca de cães com o termo entre aspas.
 - Verificação no momento: ESLint sem erros, `tsc` limpo, **67 testes**
   passando.
 
@@ -333,11 +337,13 @@ junção deixava agendamento **órfão** — por isso elas existem.
 - A `service_role` usada pelo trigger de sync fica no **Vault** (segredos
   `supabase_url` e `service_key`), nunca em `ALTER DATABASE SET` (a tabela
   `pg_db_role_setting` é legível por anon/authenticated).
-- Avisos restantes do linter (não críticos): `periodo_agendamento` com
-  search_path mutável; `btree_gist` no schema `public`; funções de trigger
-  SECURITY DEFINER "executáveis" por anon (inofensivo: o Postgres não executa
-  função de trigger fora de trigger); `rls_auto_enable` (event trigger criado
-  pelo próprio Supabase).
+- Script 12: funções de trigger (e `rls_auto_enable`) **sem EXECUTE** para
+  anon/authenticated — o Postgres só confere o EXECUTE ao criar o trigger,
+  não ao disparar; `gravar_relacionados_agendamento` sem EXECUTE para anon;
+  `periodo_agendamento` com `search_path` fixo.
+- Avisos restantes do linter (aceitos): `btree_gist` no schema `public`
+  (mover mexeria na exclusão de dupla reserva); proteção contra senhas
+  vazadas desligada (só existe no plano Pro).
 
 ### 6.7 Scripts em `supabase/`
 
@@ -346,7 +352,7 @@ no cabeçalho) · 04 regras de negócio no banco · 05 vários animais por
 agendamento · 06 RPCs atômicas · 07 revoke do `enfileirar_sync_agenda` · 08
 serviços no lugar do tipo (substitui as RPCs do 02 e do 06) · 09 extras do
 Hotel num dia específico · 10 fim do status "confirmado" · 11 status
-automático (pg_cron).
+automático (pg_cron) · 12 funções internas fora da API.
 Cada script explica no cabeçalho o problema que resolve. Mudanças no banco
 foram aplicadas também como migrations pelo MCP do Supabase.
 
@@ -361,8 +367,10 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
 (Web Crypto) → access token → Google Calendar API
 ```
 
-- Edge Function `sincronizar-agenda` (versão 7, `verify_jwt` ligado), arquivo
-  único (o deploy só sobe o `index.ts`).
+- Edge Function `sincronizar-agenda` (`verify_jwt` ligado), arquivo único
+  (o deploy só sobe o `index.ts`). **Só aceita token com papel
+  `service_role`** (o do trigger): o `verify_jwt` aceita qualquer token do
+  projeto, inclusive o de um usuário logado ou a chave anon antiga.
 - Um evento por ocorrência (sem RRULE, para cancelar dias isolados).
   Título: `"<nomes dos cães> — <Serviços>"` (ex.: `"Nick — Creche + Banho"`),
   com os serviços lidos de `agendamento_servicos`, sem repetir. Com mais de
@@ -370,9 +378,10 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   (`- Banho — 20/08`), sem valores. Fuso `America/Sao_Paulo`.
 - **Cancelar apaga o evento**; o registro fica no banco como `cancelado`.
 - Nenhum participante é convidado (service account não envia convite).
-- Lê `google_calendar_event_id` **direto do banco** (não do payload): como o
+- Do payload só usa o **id** (validado como uuid); o agendamento inteiro,
+  inclusive `google_calendar_event_id`, é lido **direto do banco**. Como o
   `pg_net` é assíncrono, várias chamadas podem sair com o mesmo retrato e
-  criar eventos duplicados.
+  criar eventos duplicados, ou um retrato antigo chegar depois de um novo.
 - Falha de sync **nunca invalida o agendamento**: grava o erro em
   `google_sync_erro`, devolve 200, e o app mostra o aviso na lista.
 - Secrets da função (painel do Supabase): `GOOGLE_SERVICE_ACCOUNT` (JSON) e
@@ -384,8 +393,9 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
 - Service account: `bgm-day-care-serviceaccount@bgm-day-care.iam.gserviceaccount.com`
   — o calendário precisa ser compartilhado com esse e-mail (permissão de
   alterar eventos). `calendarList` vazio é normal para service account.
-- Edge Function `diag-calendar` (v3) fica publicada **de propósito**, para
-  diagnóstico (testa token, leitura e escrita no calendário).
+- Edge Function `diag-calendar` (diagnóstico de token e calendário) deve
+  ser **apagada**: revela o e-mail da service account e o ID do calendário a
+  quem a chamar. O código fica no histórico do Supabase, se precisar.
 
 ## 8. Regras de negócio
 
@@ -485,6 +495,14 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   site); quem protege os dados é o RLS. `.env*` está no `.gitignore`.
 - Tudo com prefixo `NEXT_PUBLIC_` vai para o bundle público — nunca colocar
   segredo com esse prefixo.
+- **Cabeçalhos** (`next.config.ts`): `X-Frame-Options: DENY`, `nosniff`,
+  `Referrer-Policy` e `Permissions-Policy`; sem `X-Powered-By`. Sem CSP
+  completa: o Next injeta scripts inline e exigiria nonce em todo render.
+- Texto digitado pelo usuário em filtro `or(...)` do PostgREST vai **entre
+  aspas, com escape** (`valorDeFiltro`): vírgula e parênteses são sintaxe do
+  filtro.
+- Plano gratuito: sem proteção contra senhas vazadas; a compensação é a
+  regra de senha (mínimo de caracteres e tipos exigidos) no Auth.
 
 ## 11. Como rodar
 
@@ -541,10 +559,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
 ## 14. Pendências
 
 Prioridade alta (antes de liberar para as donas):
-1. **Painel do Supabase → Auth**: desligar "Allow new users to sign up" e
-   ligar "Leaked password protection".
-2. Aplicar no SQL Editor os scripts `10` (depois de publicar o app sem o
-   "confirmado") e `11`.
+1. **Painel do Supabase → Auth**: manter "Allow new users to sign up"
+   desligado e exigir senha forte em Providers → Email (mínimo de 10
+   caracteres, com letras e números).
+2. Publicar a `sincronizar-agenda` atualizada, **apagar a `diag-calendar`**
+   e rodar o script `12` no SQL Editor.
 3. Instalar nos celulares ("Adicionar à tela de início").
 4. Apontar `GOOGLE_CALENDAR_ID` para o calendário definitivo (hoje é o de
    testes do usuário), cadastrando sem quebra de linha no fim; compartilhar o

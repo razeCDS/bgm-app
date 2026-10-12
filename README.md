@@ -30,13 +30,16 @@ problema que resolve.
 | `09_servicos_por_dia.sql` | Extras do Hotel num dia específico da estadia |
 | `10_remove_status_confirmado.sql` | Tira de uso o status "confirmado" |
 | `11_status_automatico.sql` | Job do pg_cron (a cada 5 min) que avança o status pelo horário |
+| `12_seguranca_funcoes.sql` | Tira da API as funções internas (triggers e auxiliares) |
 
 ### Edge Function `sincronizar-agenda`
 
 Espelha cada agendamento como evento no Google Agenda, via service account.
 Secrets cadastrados no painel (nunca no código): `GOOGLE_SERVICE_ACCOUNT` e
 `GOOGLE_CALENDAR_ID`. A `service_role` usada pelo trigger fica no Vault do
-Supabase.
+Supabase. A função só aceita chamadas com essa chave e, do pedido, usa só o
+id do agendamento: o resto é lido do banco. Publique com o "Verify JWT"
+ligado.
 
 Falha de sync nunca invalida o agendamento: o erro vai para
 `agendamentos.google_sync_erro` e aparece como aviso na lista do app.

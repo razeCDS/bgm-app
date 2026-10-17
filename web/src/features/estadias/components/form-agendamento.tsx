@@ -46,6 +46,7 @@ import {
   DIAS_SEMANA,
   diaSemanaDe,
   ePrincipal,
+  exigeObservacoes,
   exigePlanoEstadia,
   FORMAS_PAGAMENTO,
   permiteDiaEspecifico,
@@ -224,6 +225,7 @@ function Formulario({
   const [obsPertences, setObsPertences] = useState(ini.obsPertences);
 
   const comPlano = exigePlanoEstadia(servicos);
+  const obsObrigatoria = exigeObservacoes(servicos);
   const comPertences = temPertences(servicos);
   const comRecorrencia = permiteRecorrencia(servicos);
   const comDias = permiteDiaEspecifico(servicos);
@@ -507,8 +509,8 @@ function Formulario({
           ))}
           <Dica>
             {editando
-              ? 'Creche, Hotel e Visita não podem ser alterados. Para trocar, cancele este agendamento e crie outro.'
-              : 'Creche e Hotel não se combinam; Visita é sempre sozinha.'}
+              ? 'Creche, Hotel, Visita e Outros não podem ser alterados. Para trocar, cancele este agendamento e crie outro.'
+              : 'Creche e Hotel não se combinam; Visita e Outros ficam sempre sozinhos.'}
           </Dica>
         </Secao>
 
@@ -731,11 +733,13 @@ function Formulario({
 
         <Secao titulo="Observações">
           <Campo
-            rotulo="Observações gerais"
+            rotulo={obsObrigatoria ? 'Observações gerais *' : 'Observações gerais'}
             valor={observacoes}
             aoMudar={setObservacoes}
             multilinha
           />
+          {/* Com Outros, e aqui que se diz o que o servico e. */}
+          {obsObrigatoria ? <Dica>Descreva o serviço.</Dica> : null}
         </Secao>
 
         {editando && status !== 'cancelado' ? (

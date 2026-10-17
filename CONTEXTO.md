@@ -18,7 +18,7 @@ Não é voltado para clientes finais.
 Módulos:
 - **BGM Estadias** — o único implementado: cadastro de clientes (tutor + cães +
   ficha completa) e agendamentos (Creche, Hotel, Banho, Tosa higiênica,
-  Consulta, Visita).
+  Consulta, Visita, Outros).
 - **BGM Banho/Tosa** — planejado; não existe ainda. A tela de **Módulos** foi
   removida em 05/10/2026: depois do login o app abre direto nos agendamentos.
   Quando houver um segundo módulo, a navegação entre eles volta (a tela antiga
@@ -265,7 +265,7 @@ coluna `tipo` e o `planos_estadia.valor_total` saíram com o script 08.)
 ### 6.2 Enums
 
 `servico_agendamento` (creche, hotel, banho, tosa_higienica, consulta,
-visita — substitui o antigo `tipo_agendamento`) · `status_agendamento`
+visita, outros — substitui o antigo `tipo_agendamento`) · `status_agendamento`
 (solicitado, em_andamento, concluido, cancelado; `confirmado` ainda existe no
 tipo, mas o CHECK do script 10 o recusa) · `tipo_plano`
 (diaria, semanal, mensal, anual) · `forma_pagamento` (pix, dinheiro) ·
@@ -291,9 +291,10 @@ felina) · `sexo_animal` (femea, macho).
   `total_dias > 0`, `ordem > 0`, `idade` numérica.
 - `validar_servicos_agendamento` — **constraint trigger adiado** (roda no
   COMMIT, olhando o agendamento inteiro): ao menos um serviço; Creche e Hotel
-  se excluem; Visita sozinha; plano só com Creche; pertences só com Creche
+  se excluem; Visita sozinha; Outros sozinho e com observações; plano só com Creche; pertences só com Creche
   ou Hotel; dia específico só em extras de Hotel e dentro da estadia (no
-  fuso de São Paulo; também roda quando as datas do agendamento mudam). Erros saem com `hint = 'mensagem_para_usuario'`, e o app exibe a
+  fuso de São Paulo; também roda quando as datas ou as observações do
+  agendamento mudam). Erros saem com `hint = 'mensagem_para_usuario'`, e o app exibe a
   mensagem como veio. Substitui o antigo `impedir_estadia_em_visita`.
 - UNIQUE 1:1: anamnese, termo e veterinário por animal; plano e pertences por
   agendamento.
@@ -302,7 +303,7 @@ felina) · `sexo_animal` (femea, macho).
 
 | Função | Papel |
 |---|---|
-| `criar_agendamento(...)` / `atualizar_agendamento(...)` | Gravação **atômica** (agendamento + junção + serviços + plano + pertences numa transação). Recebem `p_animal_ids uuid[]`, `p_servicos jsonb` (`[{servico, valor}]`), `p_plano jsonb`, `p_pertences jsonb`. `atualizar` recusa troca de Creche/Hotel/Visita. |
+| `criar_agendamento(...)` / `atualizar_agendamento(...)` | Gravação **atômica** (agendamento + junção + serviços + plano + pertences numa transação). Recebem `p_animal_ids uuid[]`, `p_servicos jsonb` (`[{servico, valor}]`), `p_plano jsonb`, `p_pertences jsonb`. `atualizar` recusa troca de Creche/Hotel/Visita/Outros. |
 | `gerar_ocorrencias_recorrencia(...)` | Creche recorrente: cria uma linha por dia marcado dentro da janela, copiando serviços, plano e pertences; todas com o mesmo `agendamento_recorrencia_id`. Exige Creche em `p_servicos`. Retorna os ids. |
 | `gravar_servicos_agendamento(...)` / `gravar_relacionados_agendamento(...)` | Auxiliares internas (serviços; plano/pertences). |
 | `enfileirar_sync_agenda(id)` | Enfileira a chamada HTTP para a Edge Function (via `pg_net`). **Sem EXECUTE para anon/authenticated** (script 07). |
@@ -352,7 +353,8 @@ no cabeçalho) · 04 regras de negócio no banco · 05 vários animais por
 agendamento · 06 RPCs atômicas · 07 revoke do `enfileirar_sync_agenda` · 08
 serviços no lugar do tipo (substitui as RPCs do 02 e do 06) · 09 extras do
 Hotel num dia específico · 10 fim do status "confirmado" · 11 status
-automático (pg_cron) · 12 funções internas fora da API.
+automático (pg_cron) · 12 funções internas fora da API · 13 serviço
+"Outros" (renomeia o `passeio`).
 Cada script explica no cabeçalho o problema que resolve. Mudanças no banco
 foram aplicadas também como migrations pelo MCP do Supabase.
 
@@ -412,10 +414,11 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   | Creche (período integral) | principal | só a **data**; horários vêm do plano | **obrigatório** (entrada e saída obrigatórias) | sim | sim | **por dia** |
   | Hotel | principal | início e fim (fim opcional) | não | sim | não | estadia inteira |
   | Visita | principal | início e fim | não | não | não | **não tem** |
+  | Outros | principal | início e fim | não | não | não | sim |
   | Banho, Tosa higiênica, Consulta | extra | herdam do principal; sozinhos, início e fim | não | não | não | sim |
 
-  - Creche e Hotel **não** podem ser marcados juntos; Visita fica sempre
-    sozinha; extras combinam com Creche, com Hotel ou entre si.
+  - Creche e Hotel **não** podem ser marcados juntos; Visita e Outros ficam
+    sempre sozinhos; extras combinam com Creche, com Hotel ou entre si.
   - Com Creche, todos os valores são por dia: a série copia os serviços em
     cada ocorrência. A lista e o formulário mostram a soma.
   - Forma de pagamento continua só no plano da Creche.
@@ -432,7 +435,10 @@ sincronizar-agenda → JWT RS256 assinado com a chave da service account
   do início, sem repetir o dia inicial). Horário de cada ocorrência = entrada
   e saída do plano. O formulário mostra a previsão ("Serão geradas N
   ocorrências, até dd/mm").
-- **Principais (Creche, Hotel, Visita) não mudam depois de criado**
+- **Outros** (out/2026, no lugar de um "passeio" criado para um cliente só):
+  serviço genérico, descrito nas **observações, obrigatórias** com ele
+  (app e banco).
+- **Principais (Creche, Hotel, Visita, Outros) não mudam depois de criado**
   (travados com 🔒): cancela-se e cria-se outro. **Extras** entram e saem na
   edição — inclusive numa ocorrência isolada da série (banho num dia só).
 - **Cancelar** = status `cancelado`; nunca apaga. "Cancelar este dia" afeta só

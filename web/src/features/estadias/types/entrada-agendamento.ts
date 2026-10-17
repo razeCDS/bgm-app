@@ -2,6 +2,7 @@ import { formatarData } from '../../../lib/formatadores';
 import {
   ePrincipal,
   erroCombinacao,
+  exigeObservacoes,
   exigePlanoEstadia,
   permiteDiaEspecifico,
   permiteRecorrencia,
@@ -214,6 +215,11 @@ export function validarAgendamento(e: EntradaAgendamento): string | null {
     return 'Plano de estadia só existe em agendamentos com Creche.';
   }
 
+  // "Outros" so diz o que e pelas observacoes.
+  if (exigeObservacoes(servicos) && !e.observacoes?.trim()) {
+    return ERRO_OUTROS_SEM_OBSERVACOES;
+  }
+
   // Pertences so fazem sentido quando o cao passa o dia (ou dias) aqui.
   if (e.pertencesDeixados && !temPertences(servicos)) {
     return 'Pertences deixados só existem em agendamentos de Creche ou Hotel.';
@@ -241,7 +247,7 @@ export function garantirValido(e: EntradaAgendamento): void {
 }
 
 /**
- * Na edicao, os servicos principais (Creche, Hotel, Visita) nao mudam: eles
+ * Na edicao, os servicos principais (Creche, Hotel, Visita, Outros) nao mudam: eles
  * definem a estrutura do agendamento. Extras entram e saem livremente.
  *
  * Fica fora de `validarAgendamento` porque depende do estado ANTERIOR, que
@@ -260,8 +266,11 @@ export function erroMudancaServicos(
 }
 
 export const ERRO_TROCA_PRINCIPAL =
-  'Creche, Hotel e Visita não podem ser alterados depois de criado o agendamento. ' +
+  'Creche, Hotel, Visita e Outros não podem ser alterados depois de criado o agendamento. ' +
   'Cancele este e crie outro.';
+
+/** Mesma mensagem do trigger `validar_servicos_agendamento` (script 13). */
+export const ERRO_OUTROS_SEM_OBSERVACOES = 'Descreva o serviço nas observações.';
 
 /**
  * Gera os pares (inicio, fim) de cada ocorrencia dentro do periodo.

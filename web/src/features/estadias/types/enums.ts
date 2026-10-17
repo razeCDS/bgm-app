@@ -14,7 +14,8 @@ export type ServicoAgendamento =
   | 'banho'
   | 'tosa_higienica'
   | 'consulta'
-  | 'visita';
+  | 'visita'
+  | 'outros';
 export type StatusAgendamento =
   | 'solicitado'
   | 'em_andamento'
@@ -34,6 +35,7 @@ export const SERVICOS: ServicoAgendamento[] = [
   'tosa_higienica',
   'consulta',
   'visita',
+  'outros',
 ];
 export const STATUS_AGENDAMENTO: StatusAgendamento[] = [
   'solicitado',
@@ -69,6 +71,7 @@ export const rotuloServico: Record<ServicoAgendamento, string> = {
   tosa_higienica: 'Tosa higiênica',
   consulta: 'Consulta',
   visita: 'Visita',
+  outros: 'Outros',
 };
 
 /** Texto do checkbox no formulario, onde cabe o detalhe. */
@@ -99,7 +102,7 @@ export const rotuloFormaPagamento: Record<FormaPagamento, string> = {
 // ── Regras por servico ────────────────────────────────────────────────────
 //
 // Um agendamento reune um ou mais servicos. Os PRINCIPAIS (Creche, Hotel,
-// Visita) definem a estrutura dele — de onde vem o horario, se ha plano, se
+// Visita, Outros) definem a estrutura dele — de onde vem o horario, se ha plano, se
 // ha pertences. Os EXTRAS (Banho, Tosa, Consulta) so somam um servico e um
 // valor, sozinhos ou junto de Creche/Hotel.
 //
@@ -110,7 +113,12 @@ export const rotuloFormaPagamento: Record<FormaPagamento, string> = {
  * de horario e invalidaria plano, pertences e a propria serie recorrente.
  * Para trocar, cancela-se e cria-se outro. Extras entram e saem livremente.
  */
-export const SERVICOS_PRINCIPAIS: ServicoAgendamento[] = ['creche', 'hotel', 'visita'];
+export const SERVICOS_PRINCIPAIS: ServicoAgendamento[] = [
+  'creche',
+  'hotel',
+  'visita',
+  'outros',
+];
 
 export const ePrincipal = (s: ServicoAgendamento) => SERVICOS_PRINCIPAIS.includes(s);
 
@@ -136,6 +144,12 @@ export const exigePlanoEstadia = (s: ServicoAgendamento[]) => s.includes('creche
 export const temPertences = (s: ServicoAgendamento[]) =>
   s.includes('creche') || s.includes('hotel');
 
+/**
+ * "Outros" cobre o que nao tem servico proprio (um passeio, por exemplo):
+ * o que ele e fica escrito nas observacoes, obrigatorias com ele.
+ */
+export const exigeObservacoes = (s: ServicoAgendamento[]) => s.includes('outros');
+
 /** Recorrencia so existe com Creche. */
 export const permiteRecorrencia = (s: ServicoAgendamento[]) => s.includes('creche');
 
@@ -150,7 +164,7 @@ export const servicoTemValor = (s: ServicoAgendamento) => s !== 'visita';
  *
  *  - Creche e Hotel se excluem: um tem horario diario, o outro um periodo
  *    continuo — juntos, nao haveria de onde tirar o horario.
- *  - Visita fica sozinha.
+ *  - Visita e Outros ficam sozinhos.
  *
  * Espelha o trigger `validar_servicos_agendamento` do banco.
  */
@@ -162,6 +176,9 @@ export function erroCombinacao(lista: ServicoAgendamento[]): string | null {
   }
   if (s.includes('visita') && s.length > 1) {
     return 'Visita não pode ser combinada com outros serviços.';
+  }
+  if (s.includes('outros') && s.length > 1) {
+    return 'Outros não pode ser combinado com outros serviços.';
   }
   return null;
 }

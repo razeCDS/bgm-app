@@ -163,7 +163,21 @@ export class RepositorioSupabase implements EstadiasRepositorio {
     const termo = (busca ?? '').trim();
     if (termo) {
       const padrao = valorDeFiltro(`%${termo}%`);
-      q = q.or(`nome.ilike.${padrao},raca.ilike.${padrao}`);
+      const filtros = [`nome.ilike.${padrao}`, `raca.ilike.${padrao}`];
+
+      // O `or` do PostgREST nao mistura colunas da tabela com as de um
+      // embed (`tutores.nome_completo`): o tutor entra pelos ids, buscados
+      // antes.
+      const { data: tutores, error: erroTutores } = await this.db
+        .from('tutores')
+        .select('id')
+        .ilike('nome_completo', `%${termo}%`);
+      if (erroTutores) throw traduzirErro(erroTutores);
+      if (tutores.length > 0) {
+        filtros.push(`tutor_id.in.(${tutores.map((t) => t.id).join(',')})`);
+      }
+
+      q = q.or(filtros.join(','));
     }
     const { data, error } = await q.order('nome');
     if (error) throw traduzirErro(error);

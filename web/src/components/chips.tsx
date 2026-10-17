@@ -34,6 +34,7 @@ export const iconeServico: Record<ServicoAgendamento, string> = {
   tosa_higienica: '✂️',
   consulta: '🩺',
   visita: '🤝',
+  outros: '✨',
 };
 
 /** Os servicos de um agendamento, lado a lado. */

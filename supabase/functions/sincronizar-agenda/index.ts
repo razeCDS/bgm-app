@@ -66,7 +66,8 @@ type Servico =
   | 'banho'
   | 'tosa_higienica'
   | 'consulta'
-  | 'visita';
+  | 'visita'
+  | 'outros';
 
 // Mesma ordem e rotulos do app (`SERVICOS` / `rotuloServico`).
 const rotuloServico: Record<Servico, string> = {
@@ -76,6 +77,7 @@ const rotuloServico: Record<Servico, string> = {
   tosa_higienica: 'Tosa higiênica',
   consulta: 'Consulta',
   visita: 'Visita',
+  outros: 'Outros',
 };
 const ORDEM_SERVICOS = Object.keys(rotuloServico) as Servico[];
 

@@ -31,6 +31,7 @@ problema que resolve.
 | `10_remove_status_confirmado.sql` | Tira de uso o status "confirmado" |
 | `11_status_automatico.sql` | Job do pg_cron (a cada 5 min) que avança o status pelo horário |
 | `12_seguranca_funcoes.sql` | Tira da API as funções internas (triggers e auxiliares) |
+| `13_servico_outros.sql` | Serviço "Outros" (renomeia o `passeio`), com observações obrigatórias |
 
 ### Edge Function `sincronizar-agenda`
 
@@ -63,6 +64,8 @@ todos os dados — por isso o cadastro público precisa ficar desligado.
     - **Hotel** — o período do agendamento é a própria estadia; tem
       pertences, sem plano.
     - **Visita** — sempre sozinha, sem valor, plano nem pertences.
+    - **Outros** — sempre sozinho, com valor; o que é fica nas observações,
+      obrigatórias com ele.
   - **Extras** — **Banho**, **Tosa higiênica** e **Consulta**: sozinhos (só
     período e valor) ou somados a Creche/Hotel.
   - Creche e Hotel não podem ser marcados juntos.

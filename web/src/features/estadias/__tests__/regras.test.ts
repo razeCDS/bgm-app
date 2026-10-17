@@ -266,6 +266,42 @@ describe('Combinacao de servicos', () => {
   });
 });
 
+describe('Servico Outros', () => {
+  const outros = (valor: number | null = null) => [
+    { servico: 'outros' as const, valor, data: null },
+  ];
+
+  it('fica sozinho', () => {
+    expect(erroCombinacao(['outros'])).toBeNull();
+    expect(erroCombinacao(['outros', 'banho'])).toContain('Outros');
+    expect(erroCombinacao(['hotel', 'outros'])).toContain('Outros');
+    expect(servicoIncompativel('outros', ['creche'])).toBe(true);
+    expect(servicoIncompativel('banho', ['outros'])).toBe(true);
+  });
+
+  it('exige observacoes', () => {
+    expect(validarAgendamento(base({ servicos: outros() }))).toContain('observações');
+    expect(
+      validarAgendamento(base({ servicos: outros(), observacoes: '   ' })),
+    ).toContain('observações');
+    expect(
+      validarAgendamento(base({ servicos: outros(), observacoes: 'Passeio no parque' })),
+    ).toBeNull();
+  });
+
+  it('aceita valor', () => {
+    expect(
+      validarAgendamento(base({ servicos: outros(50), observacoes: 'Passeio' })),
+    ).toBeNull();
+  });
+
+  it('nao muda depois de criado', () => {
+    expect(erroMudancaServicos(['outros'], ['banho'])).not.toBeNull();
+    expect(erroMudancaServicos(['visita'], ['outros'])).not.toBeNull();
+    expect(erroMudancaServicos(['outros'], ['outros'])).toBeNull();
+  });
+});
+
 describe('Extras num dia da hospedagem', () => {
   // Hotel de 18/08 09h a 22/08 18h.
   const hotel = (extras: { servico: ServicoAgendamento; data: Date | null }[]) =>

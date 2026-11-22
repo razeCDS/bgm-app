@@ -19,6 +19,7 @@ import {
 import {
   FILTRO_VAZIO,
   ordenarServicos,
+  recenteOuFuturo,
   servicosDe,
   valorEPorDia,
   valorTotalDe,
@@ -1124,5 +1125,37 @@ describe('Dados de exemplo', () => {
     // + Banho com Tosa.
     expect(agendamentos).toHaveLength(16);
     expect(animais.every((a) => a.tutor)).toBe(true);
+  });
+});
+
+describe('recenteOuFuturo', () => {
+  const agora = new Date(2026, 10, 22, 12, 0);
+  const diasAtras = (n: number) => new Date(agora.getTime() - n * 24 * 60 * 60 * 1000);
+
+  it('esconde o que terminou ha mais de uma semana', () => {
+    expect(
+      recenteOuFuturo({ dataHoraInicio: diasAtras(10), dataHoraFim: diasAtras(8) }, agora),
+    ).toBe(false);
+  });
+
+  it('mantem o que terminou dentro da ultima semana', () => {
+    expect(
+      recenteOuFuturo({ dataHoraInicio: diasAtras(10), dataHoraFim: diasAtras(6) }, agora),
+    ).toBe(true);
+  });
+
+  it('mantem os futuros', () => {
+    expect(
+      recenteOuFuturo({ dataHoraInicio: diasAtras(-3), dataHoraFim: diasAtras(-4) }, agora),
+    ).toBe(true);
+  });
+
+  it('sem data de fim, usa a data de inicio', () => {
+    expect(recenteOuFuturo({ dataHoraInicio: diasAtras(8), dataHoraFim: null }, agora)).toBe(
+      false,
+    );
+    expect(recenteOuFuturo({ dataHoraInicio: diasAtras(2), dataHoraFim: null }, agora)).toBe(
+      true,
+    );
   });
 });

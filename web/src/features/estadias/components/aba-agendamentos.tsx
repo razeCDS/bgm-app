@@ -10,7 +10,13 @@ import { mensagemDeErro } from '../../../lib/erros';
 import { formatarIntervalo, formatarMoeda } from '../../../lib/formatadores';
 import { useAgendamentos, useFiltroAgendamentos } from '../hooks';
 import type { Agendamento } from '../types/modelos';
-import { filtroEstaVazio, servicosDe, valorEPorDia, valorTotalDe } from '../types/modelos';
+import {
+  filtroEstaVazio,
+  recenteOuFuturo,
+  servicosDe,
+  valorEPorDia,
+  valorTotalDe,
+} from '../types/modelos';
 import { PainelFiltros } from './painel-filtros';
 
 /**
@@ -84,8 +90,18 @@ export function AbaAgendamentos() {
   const { data, isPending, error, refetch } = useAgendamentos();
   const { filtro, limparTudo } = useFiltroAgendamentos();
 
-  const linhas = useMemo(() => agruparSeries(data ?? []), [data]);
+  const semPeriodo = !filtro.dataInicio && !filtro.dataFim;
+  const linhas = useMemo(() => {
+    const todas = agruparSeries(data ?? []);
+    // Sem periodo escolhido, a lista mostra so a ultima semana e o que esta
+    // por vir. O corte e feito DEPOIS de agrupar, e nao na consulta, para as
+    // series manterem a contagem completa de ocorrencias.
+    if (!semPeriodo) return todas;
+    const agora = new Date();
+    return todas.filter((l) => recenteOuFuturo(l.destaque, agora));
+  }, [data, semPeriodo]);
   const semFiltro = filtroEstaVazio(filtro);
+  const temOcultos = semPeriodo && (data?.length ?? 0) > 0;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -98,11 +114,19 @@ export function AbaAgendamentos() {
       ) : linhas.length === 0 ? (
         <EstadoVazio
           icone="📭"
-          titulo={semFiltro ? 'Nenhum agendamento' : 'Nenhum resultado para os filtros'}
-          descricao={
+          titulo={
             semFiltro
-              ? 'Toque em + Novo para criar o primeiro agendamento.'
-              : 'Ajuste ou limpe os filtros para ver mais.'
+              ? temOcultos
+                ? 'Nenhum agendamento na última semana ou a vir'
+                : 'Nenhum agendamento'
+              : 'Nenhum resultado para os filtros'
+          }
+          descricao={
+            temOcultos
+              ? 'Use o filtro Período para ver os anteriores.'
+              : semFiltro
+                ? 'Toque em + Novo para criar o primeiro agendamento.'
+                : 'Ajuste ou limpe os filtros para ver mais.'
           }
           acao={semFiltro ? undefined : { texto: 'Limpar filtros', aoTocar: limparTudo }}
         />

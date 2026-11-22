@@ -233,6 +233,23 @@ export const filtroEstaVazio = (f: FiltroAgendamentos) =>
 export const quantidadeFiltrosAtivos = (f: FiltroAgendamentos) =>
   Object.values(f).filter((v) => v != null).length;
 
+/** Quantos dias de passado a lista mostra quando nao ha filtro de periodo. */
+export const DIAS_HISTORICO_PADRAO = 7;
+
+/**
+ * O agendamento ainda merece aparecer na lista padrao: termina depois de
+ * "agora - DIAS_HISTORICO_PADRAO". Sem fim definido, vale o inicio — a mesma
+ * semantica de sobreposicao do filtro de periodo. Sem isso a lista acumulava
+ * meses de agendamentos concluidos.
+ */
+export function recenteOuFuturo(
+  a: Pick<Agendamento, 'dataHoraInicio' | 'dataHoraFim'>,
+  agora: Date = new Date(),
+): boolean {
+  const corte = agora.getTime() - DIAS_HISTORICO_PADRAO * 24 * 60 * 60 * 1000;
+  return (a.dataHoraFim ?? a.dataHoraInicio).getTime() >= corte;
+}
+
 /**
  * Os servicos distintos, sem valores nem dias: um Banho em dois dias do
  * Hotel aparece uma vez so. E o que as regras de combinacao e os chips usam.
